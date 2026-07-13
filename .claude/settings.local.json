@@ -4,7 +4,10 @@
       "WebFetch(domain:docs.comfy.org)",
       "WebFetch(domain:docs.sillytavern.app)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "PowerShell(Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/SillyTavern/SillyTavern/release/public/scripts/slash-commands/SlashCommand.js\" -UseBasicParsing | Select-Object -ExpandProperty Content)",
+      "PowerShell(Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/SillyTavern/SillyTavern/release/public/scripts/extensions/templates.js\" -UseBasicParsing | Select-Object -ExpandProperty Content)",
+      "PowerShell($s = Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/SillyTavern/SillyTavern/release/public/scripts/slash-commands/SlashCommandParser.js\" -UseBasicParsing | Select-Object -ExpandProperty Content; Write-Output \\(\\($s -split \"`n\"\\)[55..85] -join \"`n\"\\))"
     ]
   }
 }

@@ -4,7 +4,7 @@
 // Display Name: Better Image Generation
 // ============================================================
 
-import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../../extensions.js';
+import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -99,8 +99,10 @@ let isGenerationRunning = false;
 jQuery(async () => {
     try {
         // Load the settings template for SillyTavern's Extensions panel
+        const extensionFolderPath = 'scripts/extensions/third-party/ST-BetterImgGen';
         try {
-            await renderExtensionTemplateAsync('third-party', 'ST-BetterImgGen', 'settings');
+            const settingsHtml = await $.get(`${extensionFolderPath}/templates/settings.html`);
+            $('#extensions_settings').append(settingsHtml);
         } catch (templateErr) {
             console.warn('[BetterImgGen] Could not load settings template:', templateErr);
             // Non-fatal — the modal-based settings still work via the wand button
@@ -208,18 +210,25 @@ function addWandButtonToBar(retries = 10) {
 
 function registerSlashCommands() {
     SlashCommandParser.addCommandObject(
-        new SlashCommand(
-            'bimg',
-            'Generate an image using Better Image Generation',
-            ARGUMENT_TYPE.STRING,
-            false,
-            '<mode> - The generation mode name',
-            (args, value) => {
-                const mode = value || args?.value || 'Scene';
+        SlashCommand.fromProps({
+            name: 'bimg',
+            callback: (namedArgs, unnamedArgs) => {
+                const mode = (typeof unnamedArgs === 'string' && unnamedArgs.trim()) ? unnamedArgs.trim() : 'Scene';
                 triggerGeneration(mode);
                 return '';
             },
-        ),
+            helpString: 'Generate an image using Better Image Generation. <mode> - The generation mode name (e.g., Scene, Portrait).',
+            unnamedArgumentList: [
+                new SlashCommandArgument(
+                    'The generation mode name (e.g., Scene, Portrait)',
+                    ARGUMENT_TYPE.STRING,
+                    false,
+                    false,
+                    'Scene',
+                ),
+            ],
+            returns: 'void',
+        }),
     );
 }
 
