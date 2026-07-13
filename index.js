@@ -1,6 +1,6 @@
 // ============================================================
 // ST-BetterImgGen — ComfyUI Image Generation Extension for SillyTavern
-// Extension ID: better-img-gen
+// Extension ID: ST-BetterImgGen
 // Display Name: Better Image Generation
 // ============================================================
 
@@ -12,9 +12,9 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 
 // ── Constants ─────────────────────────────────────────────
 
-const EXTENSION_ID = 'better-img-gen';
+const EXTENSION_ID = 'ST-BetterImgGen';
 const EXTENSION_NAME = 'Better Image Generation';
-const SETTINGS_KEY = 'better-img-gen';
+const SETTINGS_KEY = 'ST-BetterImgGen';
 
 // ── Default Settings ──────────────────────────────────────
 
@@ -100,7 +100,7 @@ jQuery(async () => {
     try {
         // Load the settings template for SillyTavern's Extensions panel
         try {
-            await renderExtensionTemplateAsync('third-party', 'better-img-gen', 'settings');
+            await renderExtensionTemplateAsync('third-party', 'ST-BetterImgGen', 'settings');
         } catch (templateErr) {
             console.warn('[BetterImgGen] Could not load settings template:', templateErr);
             // Non-fatal — the modal-based settings still work via the wand button

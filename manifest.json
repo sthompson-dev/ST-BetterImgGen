@@ -1,6 +1,6 @@
 {
     "name": "Better Image Generation",
-    "id": "better-img-gen",
+    "id": "ST-BetterImgGen",
     "version": "1.0.0",
     "description": "A powerful ComfyUI-powered image generation extension with prompt templates, LoRA auto-loading, per-character SD tags, and a full generation pipeline.",
     "author": "ST-BetterImgGen",
