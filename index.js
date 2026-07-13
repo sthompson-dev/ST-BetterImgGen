@@ -143,47 +143,34 @@ function saveSettings() {
 // ── Extension Registration ────────────────────────────────
 
 function registerExtension() {
-    // Use SillyTavern's built-in extension registration if available
-    const context = getContext();
-    if (context && typeof context.registerExtension === 'function') {
-        context.registerExtension({
-            id: EXTENSION_ID,
-            name: EXTENSION_NAME,
-            icon: 'fa-solid fa-wand-sparkles',
-            onClick: () => openSettingsModal(),
-        });
-        console.log('[BetterImgGen] Registered via extension API');
-        return;
-    }
-
-    // Fallback: manually add button to the extensions bar
-    addWandButtonToBar();
+    // Add a button to SillyTavern's wand menu (#extensionsMenu)
+    addToWandMenu();
 }
 
-function addWandButtonToBar(retries = 10) {
-    const extensionsBar = document.getElementById('extensions_bar');
-    if (!extensionsBar) {
+function addToWandMenu(retries = 20) {
+    const wandMenu = document.getElementById('extensionsMenu');
+    if (!wandMenu) {
         if (retries > 0) {
-            setTimeout(() => addWandButtonToBar(retries - 1), 200);
+            setTimeout(() => addToWandMenu(retries - 1), 250);
         } else {
-            console.warn('[BetterImgGen] Could not find #extensions_bar after retries');
+            console.warn('[BetterImgGen] Could not find #extensionsMenu after retries');
         }
         return;
     }
 
     // Avoid duplicates
-    if (document.getElementById(`${EXTENSION_ID}-wand-button`)) return;
+    if (document.getElementById(`${EXTENSION_ID}-wand-container`)) return;
 
-    const buttonHtml = `
-        <div id="${EXTENSION_ID}-wand-button" class="list-group-item flex-container alignitemscenter flexGrow5" title="${EXTENSION_NAME}" tabindex="0">
-            <div class="flex-container flexGrow5">
-                <span class="fa-fw fa-solid fa-wand-sparkles extensionsMenuIcon"></span>
-                <span class="extensionsMenuName">${EXTENSION_NAME}</span>
+    const containerHtml = `
+        <div id="${EXTENSION_ID}-wand-container" class="extension_container">
+            <div id="${EXTENSION_ID}-wand-button" class="interactable" title="${EXTENSION_NAME}">
+                <span class="fa-solid fa-wand-magic-sparkles"></span>
+                <span>${EXTENSION_NAME}</span>
             </div>
         </div>
     `;
 
-    extensionsBar.insertAdjacentHTML('beforeend', buttonHtml);
+    wandMenu.insertAdjacentHTML('beforeend', containerHtml);
     const btn = document.getElementById(`${EXTENSION_ID}-wand-button`);
     if (btn) {
         btn.addEventListener('click', (e) => {
@@ -191,7 +178,7 @@ function addWandButtonToBar(retries = 10) {
             e.stopPropagation();
             openSettingsModal();
         });
-        console.log('[BetterImgGen] Wand button added to extensions bar');
+        console.log('[BetterImgGen] Added to wand menu');
     }
 }
 
