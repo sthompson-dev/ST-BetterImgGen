@@ -1,0 +1,480 @@
+/* ============================================================
+ * ST-BetterImgGen — ComfyUI Image Generation Extension for SillyTavern
+ * Styles
+ * ============================================================
+ *
+ * Warm Ember theme — warm brown-black backgrounds, amber accents.
+ * Mono/Terminal fonts — Consolas/Courier New for headings & body,
+ * Cascadia Code for code blocks.
+ */
+
+/* ── Modal Layout ──────────────────────────────────────── */
+
+.better-img-gen-modal {
+    display: flex;
+    flex-direction: column;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    color: #d4c4a8;
+    background: #1e1b18;
+    height: 100%;
+    padding: 0;
+}
+
+.better-img-gen-modal-layout {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    height: calc(100% - 48px);
+}
+
+/* ── Sidebar ───────────────────────────────────────────── */
+
+.better-img-gen-sidebar {
+    width: 200px;
+    min-width: 200px;
+    background: #2f2a26;
+    border-right: 1px solid #3d3530;
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    overflow-y: auto;
+}
+
+.better-img-gen-sidebar-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    cursor: pointer;
+    color: #b8a88a;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    transition: background 0.15s, color 0.15s;
+    border-left: 3px solid transparent;
+    user-select: none;
+}
+
+.better-img-gen-sidebar-item:hover {
+    background: #3d3530;
+    color: #e08a4e;
+}
+
+.better-img-gen-sidebar-item.active {
+    background: #3d3530;
+    color: #e08a4e;
+    border-left-color: #e08a4e;
+}
+
+.better-img-gen-sidebar-icon {
+    margin-right: 10px;
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+}
+
+/* ── Content Panel ─────────────────────────────────────── */
+
+.better-img-gen-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    background: #1e1b18;
+}
+
+.better-img-gen-panel {
+    height: 100%;
+}
+
+.better-img-gen-panel.hidden {
+    display: none;
+}
+
+/* ── Footer ────────────────────────────────────────────── */
+
+.better-img-gen-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: #2f2a26;
+    border-top: 1px solid #3d3530;
+    min-height: 36px;
+}
+
+.better-img-gen-pipeline-hint {
+    font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    color: #8a7a60;
+    letter-spacing: 0.5px;
+}
+
+.better-img-gen-footer-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.better-img-gen-footer-actions .menu-button {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 4px 12px;
+    background: #3d3530;
+    color: #d4c4a8;
+    border: 1px solid #5a4a3a;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.better-img-gen-footer-actions .menu-button:hover {
+    background: #5a4a3a;
+    color: #e08a4e;
+}
+
+/* ── Section Headers ───────────────────────────────────── */
+
+.better-img-gen-section {
+    margin-bottom: 16px;
+}
+
+.better-img-gen-section-title {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: bold;
+    color: #e08a4e;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #3d3530;
+}
+
+.better-img-gen-section-subtitle {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    color: #8a7a60;
+    margin-bottom: 8px;
+}
+
+/* ── Form Elements ─────────────────────────────────────── */
+
+.better-img-gen-input {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 6px 8px;
+    background: #2f2a26;
+    color: #d4c4a8;
+    border: 1px solid #5a4a3a;
+    border-radius: 3px;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+}
+
+.better-img-gen-input:focus {
+    outline: none;
+    border-color: #e08a4e;
+}
+
+.better-img-gen-input::placeholder {
+    color: #6a5a48;
+}
+
+.better-img-gen-select {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 6px 8px;
+    background: #2f2a26;
+    color: #d4c4a8;
+    border: 1px solid #5a4a3a;
+    border-radius: 3px;
+    width: 100%;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+.better-img-gen-select:focus {
+    outline: none;
+    border-color: #e08a4e;
+}
+
+.better-img-gen-textarea {
+    font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 8px;
+    background: #2f2a26;
+    color: #d4c4a8;
+    border: 1px solid #5a4a3a;
+    border-radius: 3px;
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 60px;
+}
+
+.better-img-gen-textarea:focus {
+    outline: none;
+    border-color: #e08a4e;
+}
+
+.better-img-gen-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #d4c4a8;
+}
+
+.better-img-gen-checkbox input[type="checkbox"] {
+    accent-color: #e08a4e;
+}
+
+/* ── Buttons ───────────────────────────────────────────── */
+
+.better-img-gen-btn {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 6px 14px;
+    background: #3d3530;
+    color: #d4c4a8;
+    border: 1px solid #5a4a3a;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.better-img-gen-btn:hover {
+    background: #5a4a3a;
+    color: #e08a4e;
+}
+
+.better-img-gen-btn-primary {
+    background: #7a4a28;
+    border-color: #e08a4e;
+    color: #f0dcc0;
+}
+
+.better-img-gen-btn-primary:hover {
+    background: #9a5a34;
+    color: #fff;
+}
+
+.better-img-gen-btn-danger {
+    border-color: #a04040;
+    color: #d08080;
+}
+
+.better-img-gen-btn-danger:hover {
+    background: #5a2828;
+    color: #ff8080;
+}
+
+.better-img-gen-btn-small {
+    padding: 3px 8px;
+    font-size: 11px;
+}
+
+/* ── Inline Row (for LoRA rules, etc.) ──────────────────── */
+
+.better-img-gen-inline-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.better-img-gen-inline-row > * {
+    flex: 1;
+}
+
+.better-img-gen-inline-row .better-img-gen-btn {
+    flex: 0 0 auto;
+}
+
+/* ── Expandable Card (for templates, characters) ───────── */
+
+.better-img-gen-card {
+    background: #2f2a26;
+    border: 1px solid #3d3530;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+
+.better-img-gen-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.better-img-gen-card-header:hover {
+    background: #3d3530;
+}
+
+.better-img-gen-card-title {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: bold;
+    color: #d4c4a8;
+}
+
+.better-img-gen-card-toggle {
+    font-size: 10px;
+    color: #8a7a60;
+    transition: transform 0.2s;
+}
+
+.better-img-gen-card.expanded .better-img-gen-card-toggle {
+    transform: rotate(90deg);
+}
+
+.better-img-gen-card-body {
+    padding: 8px 12px;
+    border-top: 1px solid #3d3530;
+    display: none;
+}
+
+.better-img-gen-card.expanded .better-img-gen-card-body {
+    display: block;
+}
+
+/* ── Status Badge ──────────────────────────────────────── */
+
+.better-img-gen-badge {
+    display: inline-block;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #3d3530;
+    color: #8a7a60;
+}
+
+.better-img-gen-badge.has-tags {
+    background: #2a4a2a;
+    color: #80c080;
+}
+
+.better-img-gen-badge.no-tags {
+    background: #4a2a2a;
+    color: #c08080;
+}
+
+/* ── Reference Panel (placeholder list) ────────────────── */
+
+.better-img-gen-ref-panel {
+    background: #2f2a26;
+    border: 1px solid #3d3530;
+    border-radius: 3px;
+    padding: 8px;
+    margin-top: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.better-img-gen-ref-item {
+    font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    color: #b8a88a;
+    border-radius: 2px;
+    transition: background 0.15s;
+}
+
+.better-img-gen-ref-item:hover {
+    background: #3d3530;
+    color: #e08a4e;
+}
+
+.better-img-gen-ref-item code {
+    color: #e08a4e;
+    background: #1e1b18;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 11px;
+}
+
+/* ── jQuery UI Dialog Overrides ────────────────────────── */
+
+.ui-dialog.better-img-gen-dialog {
+    background: #1e1b18;
+    border: 1px solid #5a4a3a;
+    border-radius: 4px;
+    padding: 0;
+}
+
+.ui-dialog.better-img-gen-dialog .ui-dialog-titlebar {
+    background: #2f2a26;
+    border-bottom: 1px solid #3d3530;
+    color: #e08a4e;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 4px 4px 0 0;
+}
+
+.ui-dialog.better-img-gen-dialog .ui-dialog-titlebar-close {
+    background: none;
+    border: none;
+    color: #8a7a60;
+}
+
+.ui-dialog.better-img-gen-dialog .ui-dialog-titlebar-close:hover {
+    color: #e08a4e;
+}
+
+.ui-dialog.better-img-gen-dialog .ui-dialog-content {
+    padding: 0;
+    background: #1e1b18;
+}
+
+/* ── Generation Settings Grid ──────────────────────────── */
+
+.better-img-gen-settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.better-img-gen-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.better-img-gen-field label {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    color: #8a7a60;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ── Connection Section ────────────────────────────────── */
+
+.better-img-gen-connection-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.better-img-gen-connection-row .better-img-gen-input {
+    flex: 1;
+}
+
+.better-img-gen-connection-row .better-img-gen-btn {
+    flex: 0 0 auto;
+}
+
+/* ── Workflow Section ──────────────────────────────────── */
+
+.better-img-gen-workflow-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
