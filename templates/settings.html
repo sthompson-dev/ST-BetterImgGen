@@ -1,9 +1,277 @@
 <!--
-  ST-BetterImgGen — Settings Dialog
-  This template is rendered into the modal content area.
-  Full UI will be implemented in Epic 2.
+  ST-BetterImgGen — Settings Template
+  Renders into SillyTavern's Extensions panel.
+  Panels are built by functions in index.js (buildMainConfigPanel, etc.)
 -->
-<div id="better-img-gen-settings" class="better-img-gen-settings">
-    <!-- Settings content will be populated dynamically -->
-    <p>Loading Better Image Generation settings...</p>
+<div id="better-img-gen-settings-root" class="better-img-gen-modal">
+    <div class="better-img-gen-modal-layout">
+        <div class="better-img-gen-sidebar">
+            <div class="better-img-gen-sidebar-item active" data-panel="main-config">
+                <span class="better-img-gen-sidebar-icon">⚙</span>
+                <span>Main Config</span>
+            </div>
+            <div class="better-img-gen-sidebar-item" data-panel="prompts">
+                <span class="better-img-gen-sidebar-icon">💬</span>
+                <span>Prompts</span>
+            </div>
+            <div class="better-img-gen-sidebar-item" data-panel="lora">
+                <span class="better-img-gen-sidebar-icon">🎨</span>
+                <span>LoRA Handling</span>
+            </div>
+            <div class="better-img-gen-sidebar-item" data-panel="characters">
+                <span class="better-img-gen-sidebar-icon">👤</span>
+                <span>Characters</span>
+            </div>
+        </div>
+        <div class="better-img-gen-content">
+            <div class="better-img-gen-panel" id="better-img-gen-panel-main-config"></div>
+            <div class="better-img-gen-panel hidden" id="better-img-gen-panel-prompts"></div>
+            <div class="better-img-gen-panel hidden" id="better-img-gen-panel-lora"></div>
+            <div class="better-img-gen-panel hidden" id="better-img-gen-panel-characters"></div>
+        </div>
+    </div>
+    <div class="better-img-gen-footer">
+        <div class="better-img-gen-pipeline-hint">
+            Chat → LLM → [[replace]] → Style Prefix → ComfyUI
+        </div>
+        <div class="better-img-gen-footer-actions">
+            <button class="menu-button better-img-gen-import-btn" id="better-img-gen-import-btn">Import</button>
+            <button class="menu-button better-img-gen-export-btn" id="better-img-gen-export-btn">Export</button>
+            <button class="menu-button better-img-gen-save-btn" id="better-img-gen-save-btn">Save All Settings</button>
+        </div>
+    </div>
 </div>
+
+<script>
+// SillyTavern injects this template into the Extensions panel.
+// All functions (buildMainConfigPanel, etc.) are available from index.js.
+// We defer initialization until the DOM is ready and index.js has run.
+(function initSettingsPanel() {
+    // Poll until the builder functions are available (index.js may load after template)
+    var maxAttempts = 50;
+    var attempts = 0;
+    var interval = setInterval(function() {
+        attempts++;
+        if (typeof buildMainConfigPanel === 'function') {
+            clearInterval(interval);
+            populatePanels();
+            wireEvents();
+            console.log('[BetterImgGen] Settings panel populated');
+        } else if (attempts >= maxAttempts) {
+            clearInterval(interval);
+            console.warn('[BetterImgGen] Builder functions not found — settings panel may be empty');
+            // Show a fallback message
+            document.getElementById('better-img-gen-panel-main-config').innerHTML =
+                '<p style="color:#8a7a60;padding:16px;">Settings are initializing... Use the wand button (<i class="fa-solid fa-wand-sparkles"></i>) in the extensions bar to open settings.</p>';
+        }
+    }, 100);
+})();
+
+function populatePanels() {
+    try {
+        document.getElementById('better-img-gen-panel-main-config').innerHTML = buildMainConfigPanel();
+        document.getElementById('better-img-gen-panel-prompts').innerHTML = buildPromptsPanel();
+        document.getElementById('better-img-gen-panel-lora').innerHTML = buildLoraPanel();
+        document.getElementById('better-img-gen-panel-characters').innerHTML = buildCharactersPanel();
+    } catch (e) {
+        console.error('[BetterImgGen] Error populating settings panels:', e);
+    }
+}
+
+function wireEvents() {
+    try {
+        // Sidebar navigation
+        var sidebarItems = document.querySelectorAll('#better-img-gen-settings-root .better-img-gen-sidebar-item');
+        sidebarItems.forEach(function(item) {
+            item.addEventListener('click', function() {
+                var panel = this.getAttribute('data-panel');
+                // Update active state
+                sidebarItems.forEach(function(si) { si.classList.remove('active'); });
+                this.classList.add('active');
+                // Show/hide panels
+                var panels = document.querySelectorAll('#better-img-gen-settings-root .better-img-gen-panel');
+                panels.forEach(function(p) { p.classList.add('hidden'); });
+                var target = document.getElementById('better-img-gen-panel-' + panel);
+                if (target) target.classList.remove('hidden');
+            });
+        });
+
+        // Save button
+        var saveBtn = document.getElementById('better-img-gen-save-btn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', function() {
+                if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+                if (typeof toastr !== 'undefined') toastr.success('Settings saved.');
+            });
+        }
+
+        // Export button
+        var exportBtn = document.getElementById('better-img-gen-export-btn');
+        if (exportBtn && typeof exportSettings === 'function') {
+            exportBtn.addEventListener('click', exportSettings);
+        }
+
+        // Import button
+        var importBtn = document.getElementById('better-img-gen-import-btn');
+        if (importBtn) {
+            importBtn.addEventListener('click', function() {
+                var input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.addEventListener('change', function(e) {
+                    if (e.target.files[0] && typeof importSettings === 'function') {
+                        importSettings(e.target.files[0]);
+                    }
+                });
+                input.click();
+            });
+        }
+
+        // Wire auto-save on main config fields
+        if (typeof setupAutoSaveInput === 'function') {
+            setupAutoSaveInput('better-img-gen-comfyui-url', 'comfyuiUrl');
+            setupAutoSaveInput('better-img-gen-steps', 'steps', Number);
+            setupAutoSaveInput('better-img-gen-cfg', 'cfgScale', Number);
+            setupAutoSaveInput('better-img-gen-width', 'width', Number);
+            setupAutoSaveInput('better-img-gen-height', 'height', Number);
+            setupAutoSaveInput('better-img-gen-denoising', 'denoisingStrength', Number);
+            setupAutoSaveInput('better-img-gen-seed', 'seed', Number);
+            setupAutoSaveInput('better-img-gen-clip-skip', 'clipSkip', Number);
+        }
+        if (typeof setupAutoSaveSelect === 'function') {
+            setupAutoSaveSelect('better-img-gen-model', 'model');
+            setupAutoSaveSelect('better-img-gen-vae', 'vae');
+            setupAutoSaveSelect('better-img-gen-sampler', 'sampler');
+            setupAutoSaveSelect('better-img-gen-scheduler', 'scheduler');
+        }
+        if (typeof setupAutoSaveTextarea === 'function') {
+            setupAutoSaveTextarea('better-img-gen-style-prefix', 'stylePrefix');
+            setupAutoSaveTextarea('better-img-gen-negative-prompt', 'negativePrompt');
+        }
+        if (typeof setupAutoSaveCheckbox === 'function') {
+            setupAutoSaveCheckbox('better-img-gen-edit-before-gen', 'editBeforeGenerate');
+        }
+
+        // Wire Test Connection button
+        var testBtn = document.getElementById('better-img-gen-test-connection');
+        if (testBtn) {
+            testBtn.addEventListener('click', function() {
+                var urlInput = document.getElementById('better-img-gen-comfyui-url');
+                var url = urlInput ? urlInput.value.trim() : '';
+                if (!url) {
+                    if (typeof toastr !== 'undefined') toastr.warning('Please enter a ComfyUI URL.');
+                    return;
+                }
+                if (typeof getSettings === 'function') getSettings().comfyuiUrl = url;
+                testBtn.disabled = true;
+                testBtn.textContent = 'Testing...';
+                if (typeof testConnection === 'function') {
+                    testConnection(url).then(function(result) {
+                        testBtn.disabled = false;
+                        testBtn.textContent = 'Test Connection';
+                        if (result.success) {
+                            if (typeof toastr !== 'undefined') toastr.success('Connection successful! Cached ' + result.data.cachedModels.length + ' models, ' + result.data.cachedLoRAs.length + ' LoRAs.');
+                            if (typeof refreshSettingsDropdowns === 'function') refreshSettingsDropdowns();
+                        } else {
+                            if (typeof toastr !== 'undefined') toastr.error('Connection failed: ' + result.error);
+                        }
+                    }).catch(function(err) {
+                        testBtn.disabled = false;
+                        testBtn.textContent = 'Test Connection';
+                        if (typeof toastr !== 'undefined') toastr.error('Connection error: ' + err.message);
+                    });
+                }
+            });
+        }
+
+        // Wire Workflow buttons
+        var loadBtn = document.getElementById('better-img-gen-load-workflow');
+        if (loadBtn) {
+            loadBtn.addEventListener('click', function() {
+                var input = document.createElement('input');
+                input.type = 'file'; input.accept = '.json';
+                input.addEventListener('change', function(e) {
+                    if (!e.target.files[0]) return;
+                    var reader = new FileReader();
+                    reader.onload = function(ev) {
+                        var editor = document.getElementById('better-img-gen-workflow-editor');
+                        if (editor) { editor.value = ev.target.result; }
+                        if (typeof getSettings === 'function') { getSettings().workflowJson = ev.target.result; }
+                        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+                    };
+                    reader.readAsText(e.target.files[0]);
+                });
+                input.click();
+            });
+        }
+
+        var pasteBtn = document.getElementById('better-img-gen-paste-workflow');
+        if (pasteBtn && navigator.clipboard) {
+            pasteBtn.addEventListener('click', function() {
+                navigator.clipboard.readText().then(function(text) {
+                    var editor = document.getElementById('better-img-gen-workflow-editor');
+                    if (editor) { editor.value = text; }
+                    if (typeof getSettings === 'function') { getSettings().workflowJson = text; }
+                    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+                    if (typeof toastr !== 'undefined') toastr.success('Workflow pasted from clipboard.');
+                }).catch(function(err) {
+                    if (typeof toastr !== 'undefined') toastr.error('Could not read clipboard: ' + err.message);
+                });
+            });
+        }
+
+        var saveWfBtn = document.getElementById('better-img-gen-save-workflow');
+        if (saveWfBtn) {
+            saveWfBtn.addEventListener('click', function() {
+                var editor = document.getElementById('better-img-gen-workflow-editor');
+                if (!editor) return;
+                var blob = new Blob([editor.value], {type: 'application/json'});
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a'); a.href = url; a.download = 'workflow.json'; a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        // Workflow auto-save on edit
+        var wfEditor = document.getElementById('better-img-gen-workflow-editor');
+        if (wfEditor) {
+            wfEditor.addEventListener('input', function() {
+                if (typeof getSettings === 'function') getSettings().workflowJson = wfEditor.value;
+            });
+        }
+
+        // Placeholder click-to-insert
+        var placeholderPanel = document.getElementById('better-img-gen-placeholder-ref');
+        if (placeholderPanel) {
+            placeholderPanel.addEventListener('click', function(e) {
+                var item = e.target.closest('.better-img-gen-ref-item');
+                if (!item) return;
+                var placeholder = item.getAttribute('data-placeholder');
+                var editor = document.getElementById('better-img-gen-workflow-editor');
+                if (!editor) return;
+                var start = editor.selectionStart, end = editor.selectionEnd;
+                editor.value = editor.value.substring(0, start) + placeholder + editor.value.substring(end);
+                editor.selectionStart = editor.selectionEnd = start + placeholder.length;
+                editor.focus();
+                if (typeof getSettings === 'function') getSettings().workflowJson = editor.value;
+            });
+        }
+
+        // Character tag gen prompt auto-save
+        var tagGenPrompt = document.getElementById('better-img-gen-char-tag-gen-prompt');
+        if (tagGenPrompt) {
+            tagGenPrompt.addEventListener('input', function() {
+                if (typeof getSettings === 'function') getSettings().characterTagGenPrompt = tagGenPrompt.value;
+                if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            });
+        }
+
+        // Delegate sub-panel wiring to helper functions from index.js
+        if (typeof wirePromptsPanelEvents === 'function') wirePromptsPanelEvents('better-img-gen-settings-root');
+        if (typeof wireLoraPanelEvents === 'function') wireLoraPanelEvents();
+        if (typeof wireCharacterPanelEvents === 'function') wireCharacterPanelEvents();
+    } catch (e) {
+        console.error('[BetterImgGen] Error wiring settings events:', e);
+    }
+}
+</script>

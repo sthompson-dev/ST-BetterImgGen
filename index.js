@@ -97,19 +97,31 @@ let isGenerationRunning = false;
 // ── Initialisation ────────────────────────────────────────
 
 jQuery(async () => {
-    const settingsHtml = await renderExtensionTemplateAsync('third-party', 'better-img-gen', 'settings');
-    // The settings HTML will be rendered into a modal later (Epic 2)
-    // For now, we just initialise the extension and load settings
-    await loadSettings();
+    try {
+        // Load the settings template for SillyTavern's Extensions panel
+        try {
+            await renderExtensionTemplateAsync('third-party', 'better-img-gen', 'settings');
+        } catch (templateErr) {
+            console.warn('[BetterImgGen] Could not load settings template:', templateErr);
+            // Non-fatal — the modal-based settings still work via the wand button
+        }
 
-    // Register the extension with the extensions bar
-    registerExtension();
+        await loadSettings();
 
-    // Register slash commands
-    registerSlashCommands();
+        // Register the wand button in the extensions bar
+        registerExtension();
 
-    // Register event listeners
-    registerEventListeners();
+        // Register slash commands
+        registerSlashCommands();
+
+        // Register event listeners
+        registerEventListeners();
+
+        console.log('[BetterImgGen] Extension initialized successfully');
+    } catch (err) {
+        console.error('[BetterImgGen] Extension initialization failed:', err);
+        toastr?.error?.('Better Image Generation: initialization failed. Check console for details.');
+    }
 });
 
 // ── Settings ──────────────────────────────────────────────
@@ -140,14 +152,37 @@ function saveSettings() {
 // ── Extension Registration ────────────────────────────────
 
 function registerExtension() {
-    // Register the extension button in the extensions bar
+    // Use SillyTavern's built-in extension registration if available
     const context = getContext();
-    if (context && context.extensionSettings && typeof context.registerExtension === 'function') {
-        // This is handled by the extension.json manifest
+    if (context && typeof context.registerExtension === 'function') {
+        context.registerExtension({
+            id: EXTENSION_ID,
+            name: EXTENSION_NAME,
+            icon: 'fa-solid fa-wand-sparkles',
+            onClick: () => openSettingsModal(),
+        });
+        console.log('[BetterImgGen] Registered via extension API');
         return;
     }
 
-    // Add button to extensions bar with the wand icon
+    // Fallback: manually add button to the extensions bar
+    addWandButtonToBar();
+}
+
+function addWandButtonToBar(retries = 10) {
+    const extensionsBar = document.getElementById('extensions_bar');
+    if (!extensionsBar) {
+        if (retries > 0) {
+            setTimeout(() => addWandButtonToBar(retries - 1), 200);
+        } else {
+            console.warn('[BetterImgGen] Could not find #extensions_bar after retries');
+        }
+        return;
+    }
+
+    // Avoid duplicates
+    if (document.getElementById(`${EXTENSION_ID}-wand-button`)) return;
+
     const buttonHtml = `
         <div id="${EXTENSION_ID}-wand-button" class="list-group-item flex-container alignitemscenter flexGrow5" title="${EXTENSION_NAME}" tabindex="0">
             <div class="flex-container flexGrow5">
@@ -157,13 +192,15 @@ function registerExtension() {
         </div>
     `;
 
-    const extensionsBar = document.getElementById('extensions_bar');
-    if (extensionsBar) {
-        extensionsBar.insertAdjacentHTML('beforeend', buttonHtml);
-        document.getElementById(`${EXTENSION_ID}-wand-button`).addEventListener('click', () => {
-            // Click handler — will open the settings modal in Epic 2
+    extensionsBar.insertAdjacentHTML('beforeend', buttonHtml);
+    const btn = document.getElementById(`${EXTENSION_ID}-wand-button`);
+    if (btn) {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             openSettingsModal();
         });
+        console.log('[BetterImgGen] Wand button added to extensions bar');
     }
 }
 
