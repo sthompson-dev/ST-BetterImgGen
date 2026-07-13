@@ -1,0 +1,188 @@
+<!-- ST-BetterImgGen Settings Template -->
+<div id="better-img-gen-settings-root" class="better-img-gen-modal">
+    <div class="better-img-gen-modal-layout">
+        <div class="better-img-gen-sidebar">
+            <div class="better-img-gen-sidebar-item active" data-panel="main-config">
+                <span class="better-img-gen-sidebar-icon">⚙</span>
+                <span>Main Config</span>
+            </div>
+            <div class="better-img-gen-sidebar-item" data-panel="prompts">
+                <span class="better-img-gen-sidebar-icon">💬</span>
+                <span>Prompts</span>
+            </div>
+            <div class="better-img-gen-sidebar-item" data-panel="lora">
+                <span class="better-img-gen-sidebar-icon">🎨</span>
+                <span>LoRA Handling</span>
+            </div>
+            <div class="better-img-gen-sidebar-item" data-panel="characters">
+                <span class="better-img-gen-sidebar-icon">👤</span>
+                <span>Characters</span>
+            </div>
+        </div>
+        <div class="better-img-gen-content">
+            <div class="better-img-gen-panel" id="better-img-gen-panel-main-config"></div>
+            <div class="better-img-gen-panel hidden" id="better-img-gen-panel-prompts"></div>
+            <div class="better-img-gen-panel hidden" id="better-img-gen-panel-lora"></div>
+            <div class="better-img-gen-panel hidden" id="better-img-gen-panel-characters"></div>
+        </div>
+    </div>
+    <div class="better-img-gen-footer">
+        <div class="better-img-gen-pipeline-hint">
+            Chat → LLM → [[replace]] → Style Prefix → ComfyUI
+        </div>
+        <div class="better-img-gen-footer-actions">
+            <button class="menu-button better-img-gen-import-btn" id="better-img-gen-import-btn">Import</button>
+            <button class="menu-button better-img-gen-export-btn" id="better-img-gen-export-btn">Export</button>
+            <button class="menu-button better-img-gen-save-btn" id="better-img-gen-save-btn">Save All Settings</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function pollForBuilder() {
+    if (typeof buildMainConfigPanel === 'function') {
+        document.getElementById('better-img-gen-panel-main-config').innerHTML = buildMainConfigPanel();
+        document.getElementById('better-img-gen-panel-prompts').innerHTML = buildPromptsPanel();
+        document.getElementById('better-img-gen-panel-lora').innerHTML = buildLoraPanel();
+        document.getElementById('better-img-gen-panel-characters').innerHTML = buildCharactersPanel();
+
+        // Wire sidebar navigation
+        var sidebarItems = document.querySelectorAll('#better-img-gen-settings-root .better-img-gen-sidebar-item');
+        sidebarItems.forEach(function(item) {
+            item.addEventListener('click', function() {
+                var panel = this.dataset.panel;
+                sidebarItems.forEach(function(si) { si.classList.remove('active'); });
+                this.classList.add('active');
+                var panels = document.querySelectorAll('#better-img-gen-settings-root .better-img-gen-panel');
+                panels.forEach(function(p) { p.classList.add('hidden'); });
+                var target = document.getElementById('better-img-gen-panel-' + panel);
+                if (target) target.classList.remove('hidden');
+            });
+        });
+
+        // Wire save button
+        var saveBtn = document.getElementById('better-img-gen-save-btn');
+        if (saveBtn) saveBtn.addEventListener('click', function() {
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            if (typeof toastr !== 'undefined') toastr.success('Settings saved.');
+        });
+
+        // Wire export
+        var exportBtn = document.getElementById('better-img-gen-export-btn');
+        if (exportBtn && typeof exportSettings === 'function') {
+            exportBtn.addEventListener('click', exportSettings);
+        }
+
+        // Wire import
+        var importBtn = document.getElementById('better-img-gen-import-btn');
+        if (importBtn) importBtn.addEventListener('click', function() {
+            var input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.addEventListener('change', function(e) {
+                if (e.target.files[0] && typeof importSettings === 'function') {
+                    importSettings(e.target.files[0]);
+                }
+            });
+            input.click();
+        });
+
+        // Auto-save inputs
+        if (typeof setupAutoSaveInput === 'function') {
+            setupAutoSaveInput('better-img-gen-comfyui-url', 'comfyuiUrl');
+            setupAutoSaveInput('better-img-gen-steps', 'steps', Number);
+            setupAutoSaveInput('better-img-gen-cfg', 'cfgScale', Number);
+            setupAutoSaveInput('better-img-gen-width', 'width', Number);
+            setupAutoSaveInput('better-img-gen-height', 'height', Number);
+            setupAutoSaveInput('better-img-gen-denoising', 'denoisingStrength', Number);
+            setupAutoSaveInput('better-img-gen-seed', 'seed', Number);
+            setupAutoSaveInput('better-img-gen-clip-skip', 'clipSkip', Number);
+        }
+
+        if (typeof setupAutoSaveSelect === 'function') {
+            setupAutoSaveSelect('better-img-gen-model', 'model');
+            setupAutoSaveSelect('better-img-gen-vae', 'vae');
+            setupAutoSaveSelect('better-img-gen-sampler', 'sampler');
+            setupAutoSaveSelect('better-img-gen-scheduler', 'scheduler');
+        }
+
+        if (typeof setupAutoSaveTextarea === 'function') {
+            setupAutoSaveTextarea('better-img-gen-style-prefix', 'stylePrefix');
+            setupAutoSaveTextarea('better-img-gen-negative-prompt', 'negativePrompt');
+        }
+
+        if (typeof setupAutoSaveCheckbox === 'function') {
+            setupAutoSaveCheckbox('better-img-gen-edit-before-gen', 'editBeforeGenerate');
+        }
+
+        // Test connection button
+        var testBtn = document.getElementById('better-img-gen-test-connection');
+        if (testBtn) testBtn.addEventListener('click', async function() {
+            var urlInput = document.getElementById('better-img-gen-comfyui-url');
+            var url = urlInput ? urlInput.value.trim() : '';
+            if (!url) { toastr.warning('Please enter a ComfyUI URL.'); return; }
+            if (typeof getSettings === 'function') getSettings().comfyuiUrl = url;
+            testBtn.disabled = true;
+            testBtn.textContent = 'Testing...';
+            try {
+                if (typeof testConnection === 'function') {
+                    var result = await testConnection(url);
+                    if (result.success) {
+                        toastr.success('Connection successful! Cached ' + result.data.cachedModels.length + ' models.');
+                        if (typeof refreshSettingsDropdowns === 'function') refreshSettingsDropdowns();
+                    } else {
+                        toastr.error('Connection failed: ' + result.error);
+                    }
+                }
+            } finally {
+                testBtn.disabled = false;
+                testBtn.textContent = 'Test Connection';
+            }
+        });
+
+        // Workflow buttons
+        ['better-img-gen-load-workflow', 'better-img-gen-paste-workflow', 'better-img-gen-save-workflow'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && typeof window['handleWorkflowAction'] === 'function') {
+                el.addEventListener('click', function() { window['handleWorkflowAction'](id); });
+            }
+        });
+
+        // Placeholder reference click
+        var placeholderPanel = document.getElementById('better-img-gen-placeholder-ref');
+        if (placeholderPanel) placeholderPanel.addEventListener('click', function(e) {
+            var item = e.target.closest('.better-img-gen-ref-item');
+            if (item) {
+                var placeholder = item.dataset.placeholder;
+                var editor = document.getElementById('better-img-gen-workflow-editor');
+                if (editor) {
+                    var start = editor.selectionStart;
+                    var end = editor.selectionEnd;
+                    editor.value = editor.value.substring(0, start) + placeholder + editor.value.substring(end);
+                    editor.selectionStart = editor.selectionEnd = start + placeholder.length;
+                    editor.focus();
+                    if (typeof getSettings === 'function') getSettings().workflowJson = editor.value;
+                }
+            }
+        });
+
+        // Character tag gen prompt auto-save
+        var tagGenPrompt = document.getElementById('better-img-gen-char-tag-gen-prompt');
+        if (tagGenPrompt) tagGenPrompt.addEventListener('input', function() {
+            if (typeof getSettings === 'function') {
+                getSettings().characterTagGenPrompt = tagGenPrompt.value;
+                if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            }
+        });
+
+        // Wire prompt panel events
+        if (typeof wirePromptsPanelEvents === 'function') wirePromptsPanelEvents('better-img-gen-settings-root');
+        if (typeof wireLoraPanelEvents === 'function') wireLoraPanelEvents();
+        if (typeof wireCharacterPanelEvents === 'function') wireCharacterPanelEvents();
+
+        console.log('[BetterImgGen] Settings template wired');
+    } else {
+        setTimeout(pollForBuilder, 100);
+    }
+})();
+</script>

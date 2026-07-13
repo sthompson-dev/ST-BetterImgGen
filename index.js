@@ -7,7 +7,6 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
-import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 
 // ── Constants ─────────────────────────────────────────────
@@ -98,16 +97,6 @@ let isGenerationRunning = false;
 
 jQuery(async () => {
     try {
-        // Load the settings template for SillyTavern's Extensions panel
-        const extensionFolderPath = 'scripts/extensions/third-party/ST-BetterImgGen';
-        try {
-            const settingsHtml = await $.get(`${extensionFolderPath}/templates/settings.html`);
-            $('#extensions_settings').append(settingsHtml);
-        } catch (templateErr) {
-            console.warn('[BetterImgGen] Could not load settings template:', templateErr);
-            // Non-fatal — the modal-based settings still work via the wand button
-        }
-
         await loadSettings();
 
         // Register the wand button in the extensions bar
@@ -209,27 +198,29 @@ function addWandButtonToBar(retries = 10) {
 // ── Slash Commands ────────────────────────────────────────
 
 function registerSlashCommands() {
-    SlashCommandParser.addCommandObject(
-        SlashCommand.fromProps({
-            name: 'bimg',
-            callback: (namedArgs, unnamedArgs) => {
-                const mode = (typeof unnamedArgs === 'string' && unnamedArgs.trim()) ? unnamedArgs.trim() : 'Scene';
-                triggerGeneration(mode);
-                return '';
-            },
-            helpString: 'Generate an image using Better Image Generation. <mode> - The generation mode name (e.g., Scene, Portrait).',
-            unnamedArgumentList: [
-                new SlashCommandArgument(
-                    'The generation mode name (e.g., Scene, Portrait)',
-                    ARGUMENT_TYPE.STRING,
-                    false,
-                    false,
-                    'Scene',
-                ),
-            ],
-            returns: 'void',
-        }),
-    );
+    // Use a plain object — SlashCommand has no constructor; properties must be assigned directly
+    const cmd = {
+        name: 'bimg',
+        callback: (namedArgs, unnamedArgs) => {
+            const mode = (typeof unnamedArgs === 'string' && unnamedArgs.trim()) ? unnamedArgs.trim() : 'Scene';
+            triggerGeneration(mode);
+            return '';
+        },
+        helpString: 'Generate an image using Better Image Generation. &lt;mode&gt; - The generation mode name (e.g., Scene, Portrait).',
+        aliases: [],
+        unnamedArgumentList: [
+            new SlashCommandArgument(
+                'The generation mode name (e.g., Scene, Portrait)',
+                ARGUMENT_TYPE.STRING,
+                false,
+                false,
+                'Scene',
+            ),
+        ],
+        namedArgumentList: [],
+        returns: 'void',
+    };
+    SlashCommandParser.addCommandObject(cmd);
 }
 
 // ── Event Listeners ───────────────────────────────────────

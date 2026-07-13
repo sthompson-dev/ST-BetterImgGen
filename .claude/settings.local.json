@@ -7,7 +7,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "PowerShell(Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/SillyTavern/SillyTavern/release/public/scripts/slash-commands/SlashCommand.js\" -UseBasicParsing | Select-Object -ExpandProperty Content)",
       "PowerShell(Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/SillyTavern/SillyTavern/release/public/scripts/extensions/templates.js\" -UseBasicParsing | Select-Object -ExpandProperty Content)",
-      "PowerShell($s = Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/SillyTavern/SillyTavern/release/public/scripts/slash-commands/SlashCommandParser.js\" -UseBasicParsing | Select-Object -ExpandProperty Content; Write-Output \\(\\($s -split \"`n\"\\)[55..85] -join \"`n\"\\))"
+      "PowerShell($s = Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/SillyTavern/SillyTavern/release/public/scripts/slash-commands/SlashCommandParser.js\" -UseBasicParsing | Select-Object -ExpandProperty Content; Write-Output \\(\\($s -split \"`n\"\\)[55..85] -join \"`n\"\\))",
+      "PowerShell($content = Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/sthompson-dev/ST-BetterImgGen/main/index.js\" -UseBasicParsing | Select-Object -ExpandProperty Content; Write-Output \"Line 103:\"; \\($content -split \"`n\"\\)[102]; Write-Output \"---Line 210:\"; \\($content -split \"`n\"\\)[209]; Write-Output \"---Line 211:\"; \\($content -split \"`n\"\\)[210]; Write-Output \"---Line 212:\"; \\($content -split \"`n\"\\)[211])"
     ]
   }
 }
