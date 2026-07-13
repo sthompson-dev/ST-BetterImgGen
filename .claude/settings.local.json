@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:docs.comfy.org)",
       "WebFetch(domain:docs.sillytavern.app)",
-      "PowerShell(Start-Process \"C:\\\\Coding Projects\\\\ST-BetterImgGen\\\\prototypes\\\\index.html\")"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
