@@ -6,6 +6,7 @@
 
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 
@@ -185,29 +186,27 @@ function addToWandMenu(retries = 20) {
 // ── Slash Commands ────────────────────────────────────────
 
 function registerSlashCommands() {
-    // Use a plain object — SlashCommand has no constructor; properties must be assigned directly
-    const cmd = {
-        name: 'bimg',
-        callback: (namedArgs, unnamedArgs) => {
-            const mode = (typeof unnamedArgs === 'string' && unnamedArgs.trim()) ? unnamedArgs.trim() : 'Scene';
-            triggerGeneration(mode);
-            return '';
-        },
-        helpString: 'Generate an image using Better Image Generation. &lt;mode&gt; - The generation mode name (e.g., Scene, Portrait).',
-        aliases: [],
-        unnamedArgumentList: [
-            new SlashCommandArgument(
-                'The generation mode name (e.g., Scene, Portrait)',
-                ARGUMENT_TYPE.STRING,
-                false,
-                false,
-                'Scene',
-            ),
-        ],
-        namedArgumentList: [],
-        returns: 'void',
-    };
-    SlashCommandParser.addCommandObject(cmd);
+    SlashCommandParser.addCommandObject(
+        SlashCommand.fromProps({
+            name: 'bimg',
+            callback: (namedArgs, unnamedArgs) => {
+                const mode = (typeof unnamedArgs === 'string' && unnamedArgs.trim()) ? unnamedArgs.trim() : 'Scene';
+                triggerGeneration(mode);
+                return '';
+            },
+            helpString: 'Generate an image using Better Image Generation. &lt;mode&gt; - The generation mode name (e.g., Scene, Portrait).',
+            unnamedArgumentList: [
+                new SlashCommandArgument(
+                    'The generation mode name (e.g., Scene, Portrait)',
+                    ARGUMENT_TYPE.STRING,
+                    false,
+                    false,
+                    'Scene',
+                ),
+            ],
+            returns: 'void',
+        }),
+    );
 }
 
 // ── Event Listeners ───────────────────────────────────────
