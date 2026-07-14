@@ -144,6 +144,12 @@ async function loadSettings() {
         }
     }
 
+    // Ensure workflowJson is always a string (not a parsed object, null, etc.)
+    if (typeof extension_settings[SETTINGS_KEY].workflowJson !== 'string') {
+        console.warn('[BetterImgGen] loadSettings: workflowJson is not a string (type=' + typeof extension_settings[SETTINGS_KEY].workflowJson + '), resetting to empty string.');
+        extension_settings[SETTINGS_KEY].workflowJson = '';
+    }
+
     saveSettingsDebounced();
 }
 
@@ -507,7 +513,13 @@ async function testConnection(comfyUrl) {
 function getWorkflowJson() {
     const editor = document.getElementById('better-img-gen-workflow-editor');
     if (editor) return editor.value;
-    return getSettings().workflowJson;
+    let val = getSettings().workflowJson;
+    if (typeof val !== 'string') {
+        console.warn('[BetterImgGen] workflowJson is not a string (type=' + typeof val + '), resetting to empty string.');
+        val = '';
+        getSettings().workflowJson = '';
+    }
+    return val.trim();
 }
 
 function validateWorkflowJson(jsonString) {
@@ -518,6 +530,8 @@ function validateWorkflowJson(jsonString) {
         }
         return { valid: true, data: parsed };
     } catch (err) {
+        console.error('[BetterImgGen] validateWorkflowJson failed. First 200 chars of input:', jsonString.substring(0, 200));
+        console.error('[BetterImgGen] Input length:', jsonString.length);
         return { valid: false, error: 'Invalid JSON: ' + err.message };
     }
 }
@@ -978,36 +992,38 @@ async function generateImage(modeName, characterOverride) {
         if (!workflowStr) {
             throw new Error('No workflow JSON configured.');
         }
-        const validated = validateWorkflowJson(workflowStr);
+
+        // 11. Substitute placeholders (before validation to allow %placeholders% in template)
+        const workflow = substitutePlaceholders(
+            workflowStr, s, loraPrompt, s.negativePrompt, s.seed
+        );
+
+        // 12. Validate workflow after substitution
+        const validated = validateWorkflowJson(workflow);
         if (!validated.valid) {
             throw new Error('Invalid workflow JSON: ' + validated.error);
         }
 
-        // 11. Substitute placeholders
-        let workflow = substitutePlaceholders(
-            workflowStr, s, loraPrompt, s.negativePrompt, s.seed
-        );
-
-        // 12. Inject LoRA nodes into workflow
+        // 13. Inject LoRA nodes into workflow
         let finalWorkflow = JSON.parse(workflow);
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
         const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
-        // 13. Submit to ComfyUI
+        // 14. Submit to ComfyUI
         const promptId = await submitToComfyUI(finalWorkflowStr, s.comfyuiUrl);
 
-        // 14. Poll for result
+        // 15. Poll for result
         const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
 
-        // 15. Fetch the image
+        // 16. Fetch the image
         const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
 
-        // 16. Save and post to chat
+        // 17. Save and post to chat
         const imageDataUrl = await saveImageToStorage(imageBlob);
         const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
         await postImageToChat(imageDataUrl, loraPrompt, actualSeed);
 
-        // 17. Store in generation history for swiping
+        // 18. Store in generation history for swiping
         generationHistory.push({
             imagePath: imageDataUrl,
             prompt: loraPrompt,
@@ -1319,36 +1335,38 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
         if (!workflowStr) {
             throw new Error('No workflow JSON configured.');
         }
-        const validated = validateWorkflowJson(workflowStr);
+
+        // 10. Substitute placeholders (before validation to allow %placeholders% in template)
+        const workflow = substitutePlaceholders(
+            workflowStr, s, loraPrompt, s.negativePrompt, s.seed
+        );
+
+        // 11. Validate workflow after substitution
+        const validated = validateWorkflowJson(workflow);
         if (!validated.valid) {
             throw new Error('Invalid workflow JSON: ' + validated.error);
         }
 
-        // 10. Substitute placeholders
-        let workflow = substitutePlaceholders(
-            workflowStr, s, loraPrompt, s.negativePrompt, s.seed
-        );
-
-        // 11. Inject LoRA nodes into workflow
+        // 12. Inject LoRA nodes into workflow
         let finalWorkflow = JSON.parse(workflow);
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
         const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
-        // 12. Submit to ComfyUI
+        // 13. Submit to ComfyUI
         const promptId = await submitToComfyUI(finalWorkflowStr, s.comfyuiUrl);
 
-        // 13. Poll for result
+        // 14. Poll for result
         const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
 
-        // 14. Fetch the image
+        // 15. Fetch the image
         const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
 
-        // 15. Save and post to chat
+        // 16. Save and post to chat
         const imageDataUrl = await saveImageToStorage(imageBlob);
         const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
         await postImageToChat(imageDataUrl, loraPrompt, actualSeed);
 
-        // 16. Store in generation history for swiping
+        // 17. Store in generation history for swiping
         generationHistory.push({
             imagePath: imageDataUrl,
             prompt: loraPrompt,
