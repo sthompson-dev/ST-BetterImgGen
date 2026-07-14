@@ -1,5 +1,5 @@
 // ============================================================
-// ST-BetterImgGen v1.0.2 — ComfyUI Image Generation Extension for SillyTavern 
+// ST-BetterImgGen v1.0.4 — ComfyUI Image Generation Extension for SillyTavern 
 // Extension ID: ST-BetterImgGen
 // Display Name: Better Image Generation
 // ============================================================
@@ -262,6 +262,7 @@ async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = 
 
     if (!response.ok) {
         const errorText = await response.text();
+        console.error('[BetterImgGen] Proxy 403 response body:', errorText);
         throw new Error(`Proxy server returned HTTP ${response.status}: ${errorText}`);
     }
 
