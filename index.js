@@ -52,14 +52,22 @@ const DEFAULT_SETTINGS = {
         {
             name: 'Current Scene',
             instruction: 'Describe the current scene in the following chat as a Stable Diffusion prompt. Focus on the setting, mood, and any characters mentioned. Use [[CharacterName]] to refer to each character by their name in brackets.',
+            locked: true,
         },
         {
             name: 'Custom',
-            instruction: 'Generate a Stable Diffusion prompt based on the chat context.',
+            instruction: 'Generate a Stable Diffusion prompt based on the chat context. Additional instruction: [[prompt]]',
+            locked: true,
         },
         {
             name: 'No Context',
-            instruction: 'Generate a Stable Diffusion prompt based solely on your knowledge, without using any chat history.',
+            instruction: 'Generate a Stable Diffusion prompt based solely on your knowledge, without using any chat history. Additional instruction: [[prompt]]',
+            locked: true,
+        },
+        {
+            name: 'Portraits',
+            instruction: 'Generate a Stable Diffusion prompt of a character portrait for [[CharacterName]]. Describe their appearance, expression, and any notable features.',
+            locked: true,
         },
     ],
 
@@ -227,7 +235,7 @@ function showWandMenuDialog() {
                     🤖 Character Tags
                 </button>
                 <button class="menu-button" id="bimg-wand-portraits" style="padding:10px;font-size:14px;text-align:left;">
-                    👥 Generate Portraits
+                    🎨 Generate Image
                 </button>
             </div>
         </div>
@@ -252,7 +260,7 @@ function showWandMenuDialog() {
     });
     document.getElementById('bimg-wand-portraits').addEventListener('click', () => {
         dlg.dialog('close');
-        showCharacterPortraitDialog();
+        showGenerateImageDialog();
     });
 }
 
@@ -285,10 +293,10 @@ function registerSlashCommands() {
         SlashCommand.fromProps({
             name: 'bimg-character',
             callback: () => {
-                showCharacterPortraitDialog();
+                showGenerateImageDialog();
                 return '';
             },
-            helpString: 'Open the character portrait dialog to generate images for multiple characters.',
+            helpString: 'Open the image generation dialog.',
             unnamedArgumentList: [],
             returns: 'void',
         }),
@@ -532,12 +540,17 @@ function savePromptTemplate(index, template) {
 
 function deletePromptTemplate(index) {
     const s = getSettings();
-    if (s.promptTemplates.length <= 1) {
-        toastr.warning('Cannot delete the last template.');
-        return false;
-    }
-    if (index >= 0 && index < s.promptTemplates.length) {
-        s.promptTemplates.splice(index, 1);
+    const templates = s.promptTemplates || [];
+    if (index >= 0 && index < templates.length) {
+        if (templates[index].locked) {
+            toastr.warning(`'${templates[index].name}' is a standard template and cannot be deleted.`);
+            return false;
+        }
+        if (templates.length <= 1) {
+            toastr.warning('Cannot delete the last template.');
+            return false;
+        }
+        templates.splice(index, 1);
         saveSettingsDebounced();
         return true;
     }
@@ -1127,77 +1140,223 @@ function openTagGenerationDialog() {
     });
 }
 
-// ── Character Portrait Batch Generation ──────────────────
+// ── Generate Image Dialog ─────────────────────────────────
 
 /**
- * Show a dialog for entering character names to generate portraits for.
+ * Show a dialog for generating images using any prompt template.
+ * The dropdown is populated from promptTemplates.
+ * Conditional inputs appear based on the selected template.
  */
-function showCharacterPortraitDialog() {
-    const modes = getGenerationModes();
-    const modeOptions = modes.map((m, i) =>
-        `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${m.description ? ' — ' + escapeHtml(m.description) : ''}</option>`
+function showGenerateImageDialog() {
+    const templates = getPromptTemplates();
+    const templateOptions = templates.map((t, i) =>
+        `<option value="${i}">${escapeHtml(t.name)}</option>`
     ).join('');
 
     const dialogHtml = `
-        <div id="better-img-gen-char-portrait-dialog" title="Character Portraits">
+        <div id="better-img-gen-generate-dialog" title="Generate Image">
             <div style="padding:12px;">
                 <div class="better-img-gen-field" style="margin-bottom:12px;">
-                    <label>Character Names</label>
-                    <input type="text" class="better-img-gen-input" id="better-img-gen-char-portrait-names"
-                           placeholder="Enter character names separated by spaces (e.g. Alice Bob Charlie)">
-                    <div style="color:#8a7a60;font-size:11px;margin-top:4px;">First names only, space-separated.</div>
-                </div>
-                <div class="better-img-gen-field" style="margin-bottom:12px;">
-                    <label>Generation Mode</label>
-                    <select class="better-img-gen-select" id="better-img-gen-char-portrait-mode">
-                        ${modeOptions}
+                    <label>Selection mode</label>
+                    <select class="better-img-gen-select" id="better-img-gen-generate-template">
+                        ${templateOptions}
                     </select>
                 </div>
-                <button class="better-img-gen-btn better-img-gen-btn-primary" id="better-img-gen-char-portrait-generate-btn"
-                        style="width:100%;">Generate Portraits</button>
+                <div class="better-img-gen-field" style="margin-bottom:12px;display:none;" id="better-img-gen-char-name-field">
+                    <label>Character name</label>
+                    <input type="text" class="better-img-gen-input" id="better-img-gen-generate-char-name"
+                           placeholder="Enter character name">
+                </div>
+                <div class="better-img-gen-field" style="margin-bottom:12px;display:none;" id="better-img-gen-prompt-field">
+                    <label>Prompt</label>
+                    <textarea class="better-img-gen-textarea" id="better-img-gen-generate-prompt" rows="3"
+                              placeholder="Describe what you want the LLM to generate..."></textarea>
+                </div>
+                <button class="better-img-gen-btn better-img-gen-btn-primary" id="better-img-gen-generate-btn"
+                        style="width:100%;">Generate Image</button>
             </div>
         </div>
     `;
 
     $('body').append(dialogHtml);
-    const dlg = $('#better-img-gen-char-portrait-dialog').dialog({
+    const dlg = $('#better-img-gen-generate-dialog').dialog({
         width: 450,
         modal: true,
         close: function() { $(this).dialog('destroy').remove(); }
     });
 
-    document.getElementById('better-img-gen-char-portrait-generate-btn').addEventListener('click', async () => {
-        const namesStr = document.getElementById('better-img-gen-char-portrait-names').value.trim();
-        if (!namesStr) {
-            toastr.warning('Please enter at least one character name.');
+    // Show/hide conditional fields based on template selection
+    document.getElementById('better-img-gen-generate-template').addEventListener('change', function() {
+        const idx = parseInt(this.value);
+        const templates_list = getPromptTemplates();
+        const template = templates_list[idx];
+        const charField = document.getElementById('better-img-gen-char-name-field');
+        const promptField = document.getElementById('better-img-gen-prompt-field');
+
+        charField.style.display = 'none';
+        promptField.style.display = 'none';
+
+        if (template && template.name === 'Portraits') {
+            charField.style.display = 'block';
+        } else if (template && (template.name === 'No Context' || template.name === 'Custom')) {
+            promptField.style.display = 'block';
+        }
+    });
+
+    // Trigger initial state
+    document.getElementById('better-img-gen-generate-template').dispatchEvent(new Event('change'));
+
+    document.getElementById('better-img-gen-generate-btn').addEventListener('click', async () => {
+        const idx = parseInt(document.getElementById('better-img-gen-generate-template').value);
+        const templates_list = getPromptTemplates();
+        const template = templates_list[idx];
+        if (!template) {
+            toastr.warning('Please select a template.');
             return;
         }
 
-        const names = namesStr.split(/\s+/).filter(n => n.length > 0);
-        const modeSelect = document.getElementById('better-img-gen-char-portrait-mode');
-        const modeName = modeSelect.value;
+        let characterName = '';
+        let customPrompt = '';
+
+        if (template.name === 'Portraits') {
+            characterName = document.getElementById('better-img-gen-generate-char-name').value.trim();
+            if (!characterName) {
+                toastr.warning('Please enter a character name.');
+                return;
+            }
+        } else if (template.name === 'No Context' || template.name === 'Custom') {
+            customPrompt = document.getElementById('better-img-gen-generate-prompt').value.trim();
+            if (!customPrompt) {
+                toastr.warning('Please enter a prompt description.');
+                return;
+            }
+        }
 
         dlg.dialog('close');
-        await generateCharacterPortraits(names, modeName);
+        await generateImageFromTemplate(template, characterName, customPrompt);
     });
 }
 
 /**
- * Generate images for multiple characters by iterating through each name
- * and replacing [[character]] in the prompt template instruction.
- * @param {string[]} characterNames - Array of character first names
- * @param {string} modeName - Generation mode name
+ * Generate an image using a specific prompt template with optional
+ * character name or custom prompt injection.
+ * @param {object} template - The prompt template object
+ * @param {string} characterName - Character name for Portraits mode
+ * @param {string} customPrompt - Custom prompt for No Context / Custom mode
  */
-async function generateCharacterPortraits(characterNames, modeName) {
-    const total = characterNames.length;
-
-    for (let i = 0; i < total; i++) {
-        const name = characterNames[i];
-        toastr.info(`Generating portrait ${i + 1}/${total}: ${name}`);
-        await generateImage(modeName, name);
+async function generateImageFromTemplate(template, characterName, customPrompt) {
+    if (isGenerationRunning) {
+        toastr.warning('A generation is already in progress.');
+        return;
     }
 
-    toastr.success(`Finished generating ${total} portrait(s).`);
+    const s = getSettings();
+    if (!s.comfyuiUrl) {
+        toastr.error('Please configure the ComfyUI URL in settings first.');
+        return;
+    }
+
+    isGenerationRunning = true;
+    toastr.info('Generating...');
+
+    try {
+        // 1. Build the effective instruction by substituting placeholders
+        let effectiveInstruction = template.instruction;
+        if (characterName) {
+            effectiveInstruction = effectiveInstruction.replace(/\[\[CharacterName\]\]/g, characterName);
+        }
+        if (customPrompt) {
+            effectiveInstruction = effectiveInstruction.replace(/\[\[prompt\]\]/g, customPrompt);
+        }
+
+        // 2. Get chat context (skip for No Context)
+        const chatContext = template.name === 'No Context' ? '' : getChatContext(template.name);
+
+        // 3. Build LLM prompt
+        const effectiveTemplate = { ...template, instruction: effectiveInstruction };
+        const llmPrompt = buildLlmPrompt(effectiveTemplate, chatContext);
+
+        // 4. Call LLM for SD prompt
+        let sdPrompt = '';
+        if (llmPrompt) {
+            sdPrompt = await callLlmForPrompt(llmPrompt);
+        }
+
+        // 5. Edit prompt before generation if enabled
+        if (s.editBeforeGenerate && sdPrompt) {
+            const edited = await showPromptEditor(sdPrompt);
+            if (edited === null) {
+                isGenerationRunning = false;
+                toastr.info('Generation cancelled.');
+                return;
+            }
+            sdPrompt = edited;
+        }
+
+        // 6. Assemble final positive prompt with character tags and style prefix
+        const charTags = getCharacterTags();
+        const finalPrompt = assembleFinalPositivePrompt(sdPrompt, charTags, s.stylePrefix);
+
+        // 7. Apply LoRA keyword matching and replacement
+        const loraRules = getLoraRules();
+        const matchedRules = [];
+        let loraPrompt = finalPrompt;
+        for (const rule of loraRules) {
+            if (matchLoraKeywords(loraPrompt, rule)) {
+                matchedRules.push(rule);
+                loraPrompt = applyLoraReplacement(loraPrompt, rule);
+            }
+        }
+
+        // 8. Get workflow JSON
+        const workflowStr = getWorkflowJson();
+        if (!workflowStr) {
+            throw new Error('No workflow JSON configured.');
+        }
+        const validated = validateWorkflowJson(workflowStr);
+        if (!validated.valid) {
+            throw new Error('Invalid workflow JSON: ' + validated.error);
+        }
+
+        // 9. Substitute placeholders
+        let workflow = substitutePlaceholders(
+            workflowStr, s, loraPrompt, s.negativePrompt, s.seed
+        );
+
+        // 10. Inject LoRA nodes into workflow
+        let finalWorkflow = JSON.parse(workflow);
+        finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
+        const finalWorkflowStr = JSON.stringify(finalWorkflow);
+
+        // 11. Submit to ComfyUI
+        const promptId = await submitToComfyUI(finalWorkflowStr, s.comfyuiUrl);
+
+        // 12. Poll for result
+        const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
+
+        // 13. Fetch the image
+        const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
+
+        // 14. Save and post to chat
+        const imageDataUrl = await saveImageToStorage(imageBlob);
+        const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
+        await postImageToChat(imageDataUrl, loraPrompt, actualSeed);
+
+        // 15. Store in generation history for swiping
+        generationHistory.push({
+            imagePath: imageDataUrl,
+            prompt: loraPrompt,
+            seed: actualSeed,
+            timestamp: Date.now(),
+        });
+
+        toastr.success('Image generated!');
+    } catch (err) {
+        toastr.error('Generation failed: ' + err.message);
+        console.error('[BetterImgGen]', err);
+    } finally {
+        isGenerationRunning = false;
+    }
 }
 
 // ── Generation Pipeline Wrapper ──────────────────────────
@@ -1771,7 +1930,7 @@ function buildPromptsPanel() {
     let cardsHtml = templates.map((t, i) => `
         <div class="better-img-gen-card" data-template-index="${i}">
             <div class="better-img-gen-card-header">
-                <span class="better-img-gen-card-title">${escapeHtml(t.name)}</span>
+                <span class="better-img-gen-card-title">${escapeHtml(t.name)}${t.locked ? ' <span class="better-img-gen-badge" style="font-size:9px;opacity:0.7;">(standard)</span>' : ''}</span>
                 <span class="better-img-gen-card-toggle">▶</span>
             </div>
             <div class="better-img-gen-card-body">
@@ -1787,7 +1946,7 @@ function buildPromptsPanel() {
                 </div>
                 <div style="display:flex;gap:8px;">
                     <button class="better-img-gen-btn better-img-gen-btn-primary better-img-gen-template-save">Save</button>
-                    <button class="better-img-gen-btn better-img-gen-btn-danger better-img-gen-template-delete">Delete</button>
+                    ${t.locked ? '' : '<button class="better-img-gen-btn better-img-gen-btn-danger better-img-gen-template-delete">Delete</button>'}
                 </div>
             </div>
         </div>
