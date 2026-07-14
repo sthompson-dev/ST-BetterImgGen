@@ -325,21 +325,17 @@ async function fetchObjectInfo(comfyUrl) {
  *   -> Return as-is, filtering out non-string items.
  */
 function parseComfyField(field) {
+    // ComfyUI returns combo parameters in this format:
+    //   [["option1", "option2", ...], {"tooltip": "..."}]
+    // field[0] is the array of option strings, field[1] is a metadata object.
+    // Find the first element that is a non-empty array and return its string contents.
     if (!Array.isArray(field)) return [];
-
-    // Format A: comma-separated string + optional metadata object
-    if (field.length > 0 && typeof field[0] === 'string' && field[0].includes(',')) {
-        return field[0].split(',').map(s => s.trim()).filter(s => s.length > 0);
+    for (const item of field) {
+        if (Array.isArray(item) && item.length > 0) {
+            return item.filter(v => typeof v === 'string');
+        }
     }
-
-    // Format B: array of [name, metadata] pairs
-    if (field.length > 0 && Array.isArray(field[0])) {
-        return field.map(item => String(Array.isArray(item) && item.length > 0 ? item[0] : item))
-                    .filter(v => v && typeof v === 'string');
-    }
-
-    // Format C: plain array of strings — filter out objects like {"default": "euler"}
-    return field.filter(item => typeof item === 'string');
+    return [];
 }
 
 function extractModels(objectInfo) {
