@@ -160,27 +160,35 @@ function addToWandMenu(retries = 20) {
     }
 
     // Avoid duplicates
-    if (document.getElementById(`${EXTENSION_ID}-wand-container`)) return;
+    if (document.getElementById(`${EXTENSION_ID}-wand-configure`)) return;
 
-    const containerHtml = `
-        <div id="${EXTENSION_ID}-wand-container" class="extension_container">
-            <div id="${EXTENSION_ID}-wand-button" class="interactable" title="${EXTENSION_NAME}">
-                <span class="fa-solid fa-wand-magic-sparkles"></span>
-                <span>${EXTENSION_NAME}</span>
+    const buttons = [
+        { id: 'wand-configure', icon: '⚙', label: 'Configure', action: openSettingsModal },
+        { id: 'wand-char-tags', icon: '🤖', label: 'Character Tags', action: openTagGenerationDialog },
+        { id: 'wand-char-portraits', icon: '👥', label: 'Image Gen', action: showCharacterPortraitDialog },
+    ];
+
+    for (const btn of buttons) {
+        const html = `
+            <div id="${EXTENSION_ID}-${btn.id}" class="extension_container">
+                <div class="interactable" title="${btn.label}">
+                    <span>${btn.icon} ${btn.label}</span>
+                </div>
             </div>
-        </div>
-    `;
+        `;
+        wandMenu.insertAdjacentHTML('beforeend', html);
 
-    wandMenu.insertAdjacentHTML('beforeend', containerHtml);
-    const btn = document.getElementById(`${EXTENSION_ID}-wand-button`);
-    if (btn) {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleWandSubmenu(e.currentTarget);
-        });
-        console.log('[BetterImgGen] Added to wand menu');
+        const el = document.getElementById(`${EXTENSION_ID}-${btn.id}`);
+        if (el) {
+            el.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                btn.action();
+            });
+        }
     }
+
+    console.log('[BetterImgGen] Added 3 wand buttons: Configure, Character Tags, Image Gen');
 }
 
 // ── Slash Commands ────────────────────────────────────────
@@ -976,93 +984,7 @@ async function showPromptEditor(prompt) {
 }
 
 // ── Wand Menu (Epic 8) ──────────────────────────────────
-
-/**
- * Toggle the wand submenu on/off, positioning it below the button.
- */
-function toggleWandSubmenu(btn) {
-    const existing = document.getElementById('better-img-gen-wand-menu');
-    if (existing && existing.style.display === 'block') {
-        existing.style.display = 'none';
-        return;
-    }
-
-    const menu = buildWandMenu();
-    const rect = btn.getBoundingClientRect();
-    menu.style.position = 'fixed';
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
-    menu.style.display = 'block';
-
-    // Close on click outside
-    const closeHandler = (e) => {
-        if (!menu.contains(e.target) && e.target !== btn) {
-            menu.style.display = 'none';
-            document.removeEventListener('click', closeHandler);
-        }
-    };
-    // Use setTimeout to avoid the same click event closing it
-    setTimeout(() => document.addEventListener('click', closeHandler), 0);
-}
-
-function buildWandMenu() {
-    const modes = getGenerationModes();
-    const menuId = 'better-img-gen-wand-menu';
-    let existingMenu = document.getElementById(menuId);
-    if (existingMenu) existingMenu.remove();
-
-    let itemsHtml = modes.map(m => `
-        <div class="list-group-item flex-container" data-mode="${escapeHtml(m.name)}" style="cursor:pointer;">
-            <span>${escapeHtml(m.name)}</span>
-            <span style="color:#8a7a60;font-size:10px;margin-left:8px;">${escapeHtml(m.description || '')}</span>
-        </div>
-    `).join('');
-
-    itemsHtml += `
-        <div class="list-group-item flex-container" id="better-img-gen-wand-char-portraits" style="cursor:pointer;">
-            <span>👥 Character Portraits...</span>
-        </div>
-        <div class="list-group-item flex-container" id="better-img-gen-wand-configure" style="cursor:pointer;">
-            <span>⚙ Configure...</span>
-        </div>
-        <div class="list-group-item flex-container" id="better-img-gen-wand-gen-tags" style="cursor:pointer;">
-            <span>🤖 Generate Character Tags...</span>
-        </div>
-    `;
-
-    const menuHtml = `<div id="${menuId}" class="list-group" style="display:none;position:absolute;z-index:1000;">${itemsHtml}</div>`;
-    document.body.insertAdjacentHTML('beforeend', menuHtml);
-
-    const menu = document.getElementById(menuId);
-
-    // Wire mode clicks
-    menu.querySelectorAll('[data-mode]').forEach(el => {
-        el.addEventListener('click', () => {
-            menu.style.display = 'none';
-            generateImage(el.dataset.mode);
-        });
-    });
-
-    // Wire Configure click
-    document.getElementById('better-img-gen-wand-configure').addEventListener('click', () => {
-        menu.style.display = 'none';
-        openSettingsModal();
-    });
-
-    // Wire Character Portraits click
-    document.getElementById('better-img-gen-wand-char-portraits').addEventListener('click', () => {
-        menu.style.display = 'none';
-        showCharacterPortraitDialog();
-    });
-
-    // Wire Generate Character Tags click
-    document.getElementById('better-img-gen-wand-gen-tags').addEventListener('click', () => {
-        menu.style.display = 'none';
-        openTagGenerationDialog();
-    });
-
-    return menu;
-}
+// Extension buttons are registered directly in addToWandMenu() above.
 
 function openTagGenerationDialog() {
     const dialogHtml = `
