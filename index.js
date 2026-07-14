@@ -253,10 +253,16 @@ async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = 
     if (query) payload.query = query;
     if (body !== undefined) payload.body = body;
 
+    // Include ST's auth headers (CSRF token, etc.)
+    const authHeaders = typeof getRequestHeaders === 'function' ? getRequestHeaders() : {};
+
     const response = await fetch(proxyEndpoint, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders,
+        },
         body: JSON.stringify(payload),
     });
 

@@ -42,12 +42,12 @@ volumes:
 
 ### 2. Server Plugin
 
-Copy `st-betterimgen.js` into SillyTavern's `plugins` directory:
+Copy `st-betterimgen.cjs` into SillyTavern's `plugins` directory:
 
 ```
 SillyTavern/
 ├── plugins/
-│   └── st-betterimgen.js               ← copy the plugin here
+│   └── st-betterimgen.cjs              ← copy the plugin here
 ├── config/
 │   └── config.yaml                     ← add setting below
 ├── data/
@@ -108,7 +108,7 @@ better-img-gen/
 ├── manifest.json                — Extension manifest
 ├── index.js                     — Main extension logic
 ├── style.css                    — UI styles
-├── st-betterimgen.js            — ST server plugin (ComfyUI proxy)
+├── st-betterimgen.cjs           — ST server plugin (ComfyUI proxy)
 ├── templates/
 │   └── settings.html            — Settings modal template
 └── README.md
