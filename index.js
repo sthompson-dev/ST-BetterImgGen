@@ -256,12 +256,9 @@ async function discoverProxyPort() {
 
 /**
  * Send a request to the ComfyUI proxy endpoint on the SillyTavern server.
- * Uses GET-based proxy (no CSRF) as the primary method, falling back to
- * POST if needed.
- *
- * Strategy:
- * 1. Try GET with JSON-encoded payload in query params (CSRF-free)
- * 2. If GET fails (e.g. payload too large), try POST with CSRF token
+ * Uses GET-based proxy only (no CSRF). POST fallback is removed because
+ * Cloudflare Zero Trust strips the _csrf cookie, making POST requests
+ * impossible. GET bypasses CSRF entirely.
  *
  * @param {string} comfyUrl - The base ComfyUI URL (e.g. http://127.0.0.1:8188)
  * @param {string} endpoint - The ComfyUI endpoint path (e.g. /object_info)
@@ -269,9 +266,10 @@ async function discoverProxyPort() {
  * @param {string} [options.method] - HTTP method (default GET)
  * @param {object} [options.query] - URL query params
  * @param {any} [options.body] - JSON body for POST/PUT
+ * @param {boolean} [options.binary] - If true, returns base64 data instead of parsed JSON
  * @returns {Promise<any>} The response data from ComfyUI
  */
-async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = {}) {
+async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body, binary } = {}) {
     const payload = {
         comfyuiUrl: comfyUrl,
         endpoint: endpoint,
@@ -280,62 +278,17 @@ async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = 
 
     if (query) payload.query = query;
     if (body !== undefined) payload.body = body;
+    if (binary) payload.binary = true;
 
-    // ── Try GET-based proxy (no CSRF needed) ──────────────
-    try {
-        const payloadJson = JSON.stringify(payload);
-        const proxyEndpoint = `${PROXY_BASE}/proxy?payload=${encodeURIComponent(payloadJson)}`;
-        const response = await fetch(proxyEndpoint, {
-            method: 'GET',
-        });
-
-        if (response.ok) {
-            const result = await response.json();
-            if (!result.ok) {
-                throw new Error(result.error || `ComfyUI returned HTTP ${result.status}`);
-            }
-            return result.data;
-        }
-
-        // If GET returns 400 (missing payload) or 413 (too large), fall through
-        if (response.status !== 400 && response.status !== 413) {
-            const errorText = await response.text();
-            console.error('[BetterImgGen] Proxy GET failed:', response.status, errorText);
-            // Fall through to POST
-        }
-    } catch (err) {
-        console.warn('[BetterImgGen] GET proxy failed, trying POST:', err.message);
-    }
-
-    // ── Fallback: POST-based proxy (may need CSRF) ────────
-    const proxyEndpoint = PROXY_BASE + '/proxy';
-
-    // Read CSRF token from the _csrf cookie set by SillyTavern
-    function getCsrfToken() {
-        const match = document.cookie.match(/(?:^|;\s*)_csrf=([^;]*)/);
-        return match ? decodeURIComponent(match[1]) : null;
-    }
-
-    const csrfToken = getCsrfToken();
-    const authHeaders = csrfToken ? { 'X-CSRF-Token': csrfToken } : {};
-
+    // ── GET-based proxy (no CSRF needed) ──────────────────
+    const payloadJson = JSON.stringify(payload);
+    const proxyEndpoint = `${PROXY_BASE}/proxy?payload=${encodeURIComponent(payloadJson)}`;
     const response = await fetch(proxyEndpoint, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-            ...authHeaders,
-        },
-        body: JSON.stringify(payload),
+        method: 'GET',
     });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[BetterImgGen] Proxy POST 403 response body:', errorText);
-        throw new Error(`Proxy server returned HTTP ${response.status}: ${errorText}`);
-    }
-
     const result = await response.json();
+
     if (!result.ok) {
         throw new Error(result.error || `ComfyUI returned HTTP ${result.status}`);
     }
@@ -757,43 +710,26 @@ async function pollForResult(promptId, comfyUrl) {
 }
 
 async function fetchGeneratedImage(imageInfo, comfyUrl) {
-    // For fetching the image blob, we need the raw binary data (base64).
-    // Use the proxy with binary flag to get it.
+    // Fetch the generated image via the GET-based proxy (no CSRF).
     try {
-        const result = await fetch(PROXY_BASE + '/proxy', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                comfyuiUrl: comfyUrl,
-                endpoint: '/view',
-                method: 'GET',
-                query: {
-                    filename: imageInfo.filename,
-                    subfolder: imageInfo.subfolder,
-                    type: imageInfo.type,
-                },
-                binary: true,
-            }),
+        const data = await proxyFetch(comfyUrl, '/view', {
+            method: 'GET',
+            query: {
+                filename: imageInfo.filename,
+                subfolder: imageInfo.subfolder,
+                type: imageInfo.type,
+            },
+            binary: true,
         });
 
-        if (!result.ok) {
-            throw new Error(`Proxy returned HTTP ${result.status}`);
-        }
-
-        const json = await result.json();
-        if (!json.ok) {
-            throw new Error(json.error || 'Image fetch failed');
-        }
-
         // Decode base64 to binary
-        const binaryStr = atob(json.data);
+        const binaryStr = atob(data);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) {
             bytes[i] = binaryStr.charCodeAt(i);
         }
 
-        return new Blob([bytes], { type: json.contentType || 'image/png' });
+        return new Blob([bytes], { type: 'image/png' });
     } catch (err) {
         throw new Error(`Failed to fetch generated image: ${err.message}`);
     }
