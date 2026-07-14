@@ -149,6 +149,7 @@ function registerExtension() {
 }
 
 function addToWandMenu(retries = 20) {
+    // Step 1: wait for #extensionsMenu
     const wandMenu = document.getElementById('extensionsMenu');
     if (!wandMenu) {
         if (retries > 0) {
@@ -159,36 +160,83 @@ function addToWandMenu(retries = 20) {
         return;
     }
 
-    // Avoid duplicates
-    if (document.getElementById(`${EXTENSION_ID}-wand-configure`)) return;
-
-    const buttons = [
-        { id: 'wand-configure', icon: '⚙', label: 'Configure', action: openSettingsModal },
-        { id: 'wand-char-tags', icon: '🤖', label: 'Character Tags', action: openTagGenerationDialog },
-        { id: 'wand-char-portraits', icon: '👥', label: 'Image Gen', action: showCharacterPortraitDialog },
-    ];
-
-    for (const btn of buttons) {
-        const html = `
-            <div id="${EXTENSION_ID}-${btn.id}" class="extension_container">
-                <div class="interactable" title="${btn.label}">
-                    <span>${btn.icon} ${btn.label}</span>
-                </div>
-            </div>
-        `;
-        wandMenu.insertAdjacentHTML('beforeend', html);
-
-        const el = document.getElementById(`${EXTENSION_ID}-${btn.id}`);
-        if (el) {
-            el.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                btn.action();
-            });
-        }
+    // Step 2: try to find an existing wand entry that ST may have created for us
+    const existingEntry = document.querySelector('#extensionsMenu .list-group-item');
+    if (existingEntry) {
+        // ST already built an entry — just override its click handler
+        existingEntry.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showWandMenuDialog();
+        };
+        console.log('[BetterImgGen] Hooked into existing wand entry');
+        return;
     }
 
-    console.log('[BetterImgGen] Added 3 wand buttons: Configure, Character Tags, Image Gen');
+    // Step 3: no existing entry found — create our own list-group-item
+    if (document.getElementById(`${EXTENSION_ID}-wand-entry`)) return;
+
+    const html = `
+        <div id="${EXTENSION_ID}-wand-entry" class="list-group-item" title="Better Image Generation">
+            <span>🎨 Better Image Generation</span>
+        </div>
+    `;
+    wandMenu.insertAdjacentHTML('beforeend', html);
+
+    const el = document.getElementById(`${EXTENSION_ID}-wand-entry`);
+    if (el) {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showWandMenuDialog();
+        });
+    }
+
+    console.log('[BetterImgGen] Added wand entry: Better Image Generation');
+}
+
+/**
+ * Show a dialog with the three main actions (Configure, Character Tags, Generate Portraits).
+ * This avoids fighting ST's wand menu rendering which strips injected .extension_container divs.
+ */
+function showWandMenuDialog() {
+    const dialogHtml = `
+        <div id="better-img-gen-wand-dialog" title="Better Image Generation" style="display:none;">
+            <div style="padding:12px;display:flex;flex-direction:column;gap:8px;">
+                <button class="menu-button" id="bimg-wand-configure" style="padding:10px;font-size:14px;text-align:left;">
+                    ⚙ Configure
+                </button>
+                <button class="menu-button" id="bimg-wand-char-tags" style="padding:10px;font-size:14px;text-align:left;">
+                    🤖 Character Tags
+                </button>
+                <button class="menu-button" id="bimg-wand-portraits" style="padding:10px;font-size:14px;text-align:left;">
+                    👥 Generate Portraits
+                </button>
+            </div>
+        </div>
+    `;
+
+    $('body').append(dialogHtml);
+    const dlg = $('#better-img-gen-wand-dialog').dialog({
+        width: 320,
+        modal: true,
+        close: function () {
+            $(this).dialog('destroy').remove();
+        },
+    });
+
+    document.getElementById('bimg-wand-configure').addEventListener('click', () => {
+        dlg.dialog('close');
+        openSettingsModal();
+    });
+    document.getElementById('bimg-wand-char-tags').addEventListener('click', () => {
+        dlg.dialog('close');
+        openTagGenerationDialog();
+    });
+    document.getElementById('bimg-wand-portraits').addEventListener('click', () => {
+        dlg.dialog('close');
+        showCharacterPortraitDialog();
+    });
 }
 
 // ── Slash Commands ────────────────────────────────────────
