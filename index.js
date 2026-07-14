@@ -1114,10 +1114,9 @@ async function generateImage(modeName, characterOverride) {
         // 13. Inject LoRA nodes into workflow
         let finalWorkflow = validated.data;
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
-        const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
-        // 14. Submit to ComfyUI
-        const promptId = await submitToComfyUI(finalWorkflowStr, s.comfyuiUrl);
+        // 14. Submit to ComfyUI (pass object, not string — proxyFetch will serialize it correctly)
+        const promptId = await submitToComfyUI(finalWorkflow, s.comfyuiUrl);
 
         // 15. Poll for result
         const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
@@ -1469,10 +1468,9 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
         // 12. Inject LoRA nodes into workflow
         let finalWorkflow = validated.data;
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
-        const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
-        // 13. Submit to ComfyUI
-        const promptId = await submitToComfyUI(finalWorkflowStr, s.comfyuiUrl);
+        // 13. Submit to ComfyUI (pass object, not string — proxyFetch will serialize it correctly)
+        const promptId = await submitToComfyUI(finalWorkflow, s.comfyuiUrl);
 
         // 14. Poll for result
         const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
