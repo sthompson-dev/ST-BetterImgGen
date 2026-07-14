@@ -229,9 +229,39 @@ function refreshCharacterTags() {
 // SillyTavern mounts server extensions at /api/plugins/<name>/
 const PROXY_BASE = '/api/plugins/st-betterimgen';
 
+// Standalone proxy port (discovered from server)
+let standaloneProxyPort = null;
+let standaloneProxyDiscovered = false;
+
+/**
+ * Discover the standalone proxy port from ST's plugin endpoint.
+ * This avoids CSRF issues caused by Cloudflare Zero Trust stripping cookies.
+ */
+async function discoverProxyPort() {
+    if (standaloneProxyDiscovered) return;
+    try {
+        const response = await fetch(PROXY_BASE + '/proxy-port', { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            if (data.ok && data.port) {
+                standaloneProxyPort = data.port;
+                standaloneProxyDiscovered = true;
+                console.log('[BetterImgGen] Discovered standalone proxy on port', standaloneProxyPort);
+            }
+        }
+    } catch (err) {
+        console.warn('[BetterImgGen] Could not discover standalone proxy port:', err.message);
+    }
+}
+
 /**
  * Send a request to the ComfyUI proxy endpoint on the SillyTavern server.
- * This avoids CORS and mixed-content issues in the browser.
+ * Uses GET-based proxy (no CSRF) as the primary method, falling back to
+ * POST if needed.
+ *
+ * Strategy:
+ * 1. Try GET with JSON-encoded payload in query params (CSRF-free)
+ * 2. If GET fails (e.g. payload too large), try POST with CSRF token
  *
  * @param {string} comfyUrl - The base ComfyUI URL (e.g. http://127.0.0.1:8188)
  * @param {string} endpoint - The ComfyUI endpoint path (e.g. /object_info)
@@ -242,8 +272,6 @@ const PROXY_BASE = '/api/plugins/st-betterimgen';
  * @returns {Promise<any>} The response data from ComfyUI
  */
 async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = {}) {
-    const proxyEndpoint = PROXY_BASE + '/proxy';
-
     const payload = {
         comfyuiUrl: comfyUrl,
         endpoint: endpoint,
@@ -252,6 +280,35 @@ async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = 
 
     if (query) payload.query = query;
     if (body !== undefined) payload.body = body;
+
+    // ── Try GET-based proxy (no CSRF needed) ──────────────
+    try {
+        const payloadJson = JSON.stringify(payload);
+        const proxyEndpoint = `${PROXY_BASE}/proxy?payload=${encodeURIComponent(payloadJson)}`;
+        const response = await fetch(proxyEndpoint, {
+            method: 'GET',
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            if (!result.ok) {
+                throw new Error(result.error || `ComfyUI returned HTTP ${result.status}`);
+            }
+            return result.data;
+        }
+
+        // If GET returns 400 (missing payload) or 413 (too large), fall through
+        if (response.status !== 400 && response.status !== 413) {
+            const errorText = await response.text();
+            console.error('[BetterImgGen] Proxy GET failed:', response.status, errorText);
+            // Fall through to POST
+        }
+    } catch (err) {
+        console.warn('[BetterImgGen] GET proxy failed, trying POST:', err.message);
+    }
+
+    // ── Fallback: POST-based proxy (may need CSRF) ────────
+    const proxyEndpoint = PROXY_BASE + '/proxy';
 
     // Read CSRF token from the _csrf cookie set by SillyTavern
     function getCsrfToken() {
@@ -274,7 +331,7 @@ async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = 
 
     if (!response.ok) {
         const errorText = await response.text();
-        console.error('[BetterImgGen] Proxy 403 response body:', errorText);
+        console.error('[BetterImgGen] Proxy POST 403 response body:', errorText);
         throw new Error(`Proxy server returned HTTP ${response.status}: ${errorText}`);
     }
 
