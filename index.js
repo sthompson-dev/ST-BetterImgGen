@@ -5,7 +5,7 @@
 // ============================================================
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { saveSettingsDebounced } from '../../../../script.js';
+import { saveSettingsDebounced, generateQuietPrompt } from '../../../../script.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
@@ -711,13 +711,9 @@ function buildLlmPrompt(template, chatContext) {
 }
 
 async function callLlmForPrompt(llmPrompt) {
-    // Use SillyTavern's built-in text completion API
-    const context = getContext();
-    if (!context || typeof context.generateText !== 'function') {
-        throw new Error('SillyTavern chat API not available.');
-    }
+    // Use SillyTavern's built-in quiet text generation API
     try {
-        const result = await context.generateText(llmPrompt);
+        const result = await generateQuietPrompt({ quietPrompt: llmPrompt });
         return result || '';
     } catch (err) {
         throw new Error('LLM generation failed: ' + err.message);
