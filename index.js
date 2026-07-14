@@ -307,12 +307,47 @@ async function fetchObjectInfo(comfyUrl) {
     }
 }
 
+/**
+ * Parse a ComfyUI object_info field value into an array of option strings.
+ *
+ * ComfyUI returns combo parameter data in several formats:
+ *
+ * Format A (unprocessed): comma-separated string + metadata object
+ *   ["euler, heun, dpmpp_2m, ...", {"default": "euler"}]
+ *   -> Split the first element by comma, return individual values.
+ *
+ * Format B (checkpoints/VAEs/LoRAs with subfolders):
+ *   [["name1.safetensors", ["checkpoints"]], ["name2.safetensors", ["checkpoints"]]]
+ *   -> Return first element of each sub-array.
+ *
+ * Format C (already preprocessed by ComfyUI frontend):
+ *   ["euler", "heun", "dpmpp_2m", ...]
+ *   -> Return as-is, filtering out non-string items.
+ */
+function parseComfyField(field) {
+    if (!Array.isArray(field)) return [];
+
+    // Format A: comma-separated string + optional metadata object
+    if (field.length > 0 && typeof field[0] === 'string' && field[0].includes(',')) {
+        return field[0].split(',').map(s => s.trim()).filter(s => s.length > 0);
+    }
+
+    // Format B: array of [name, metadata] pairs
+    if (field.length > 0 && Array.isArray(field[0])) {
+        return field.map(item => String(Array.isArray(item) && item.length > 0 ? item[0] : item))
+                    .filter(v => v && typeof v === 'string');
+    }
+
+    // Format C: plain array of strings — filter out objects like {"default": "euler"}
+    return field.filter(item => typeof item === 'string');
+}
+
 function extractModels(objectInfo) {
     if (!objectInfo) return [];
     const loader = objectInfo['CheckpointLoaderSimple'] || objectInfo['CheckpointLoader'];
     if (loader && loader.input && loader.input.required) {
         const ckptField = loader.input.required.ckpt_name || loader.input.required.ckpt_path;
-        if (ckptField && Array.isArray(ckptField)) return ckptField;
+        return parseComfyField(ckptField);
     }
     return [];
 }
@@ -322,7 +357,7 @@ function extractVAEs(objectInfo) {
     const loader = objectInfo['VAELoader'] || objectInfo['VAEDecode'];
     if (loader && loader.input && loader.input.required) {
         const vaeField = loader.input.required.vae_name;
-        if (vaeField && Array.isArray(vaeField)) return vaeField;
+        return parseComfyField(vaeField);
     }
     return [];
 }
@@ -332,7 +367,7 @@ function extractSamplers(objectInfo) {
     const sampler = objectInfo['KSampler'];
     if (sampler && sampler.input && sampler.input.required) {
         const nameField = sampler.input.required.sampler_name;
-        if (nameField && Array.isArray(nameField)) return nameField;
+        return parseComfyField(nameField);
     }
     return [];
 }
@@ -342,7 +377,7 @@ function extractSchedulers(objectInfo) {
     const sampler = objectInfo['KSampler'];
     if (sampler && sampler.input && sampler.input.required) {
         const schedField = sampler.input.required.scheduler;
-        if (schedField && Array.isArray(schedField)) return schedField;
+        return parseComfyField(schedField);
     }
     return [];
 }
@@ -352,7 +387,7 @@ function extractLoRAs(objectInfo) {
     const loader = objectInfo['LoraLoader'];
     if (loader && loader.input && loader.input.required) {
         const loraField = loader.input.required.lora_name;
-        if (loraField && Array.isArray(loraField)) return loraField;
+        return parseComfyField(loraField);
     }
     return [];
 }
