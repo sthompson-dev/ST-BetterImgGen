@@ -534,23 +534,72 @@ function validateWorkflowJson(jsonString) {
         // placeholder substitution leaves garbage before/after the JSON (e.g.,
         // %seed% placed before the opening brace in the workflow template).
         const firstBrace = jsonString.indexOf('{');
-        const lastBrace = jsonString.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace > firstBrace) {
-            try {
-                const extracted = jsonString.substring(firstBrace, lastBrace + 1);
-                const parsed = JSON.parse(extracted);
-                if (parsed && typeof parsed === 'object') {
-                    console.warn('[BetterImgGen] Workflow JSON had extra characters before/after the JSON object; extracted valid JSON.');
-                    return { valid: true, data: parsed };
+        if (firstBrace !== -1) {
+            // Find the matching closing brace, skipping braces inside strings
+            const matchEnd = findMatchingBrace(jsonString, firstBrace);
+            if (matchEnd !== -1) {
+                const extracted = jsonString.substring(firstBrace, matchEnd + 1);
+                try {
+                    const parsed = JSON.parse(extracted);
+                    if (parsed && typeof parsed === 'object') {
+                        console.warn('[BetterImgGen] Workflow JSON had extra characters before/after the JSON object; extracted valid JSON.');
+                        return { valid: true, data: parsed };
+                    }
+                } catch (e) {
+                    console.error('[BetterImgGen] Extraction attempt failed.');
+                    console.error('[BetterImgGen] Extracted first 200 chars:', extracted.substring(0, 200));
+                    console.error('[BetterImgGen] Extraction parse error:', e.message);
+                    console.error('[BetterImgGen] firstBrace:', firstBrace, 'matchEnd:', matchEnd);
                 }
-            } catch (e) {
-                // Fall through to original error
+            } else {
+                console.error('[BetterImgGen] Could not find matching closing brace.');
+                console.error('[BetterImgGen] firstBrace:', firstBrace);
             }
         }
         console.error('[BetterImgGen] validateWorkflowJson failed. First 200 chars of input:', jsonString.substring(0, 200));
         console.error('[BetterImgGen] Input length:', jsonString.length);
         return { valid: false, error: 'Invalid JSON: ' + err.message };
     }
+}
+
+/**
+ * Find the matching closing brace for the opening brace at startPos.
+ * Skips braces that appear inside JSON strings.
+ * Returns the position of the matching '}', or -1 if not found.
+ */
+function findMatchingBrace(str, startPos) {
+    let depth = 0;
+    let inString = false;
+    let escapeNext = false;
+
+    for (let i = startPos; i < str.length; i++) {
+        const ch = str[i];
+
+        if (escapeNext) {
+            escapeNext = false;
+            continue;
+        }
+
+        if (ch === '\\' && inString) {
+            escapeNext = true;
+            continue;
+        }
+
+        if (ch === '"' && !escapeNext) {
+            inString = !inString;
+            continue;
+        }
+
+        if (!inString) {
+            if (ch === '{') depth++;
+            if (ch === '}') {
+                depth--;
+                if (depth === 0) return i;
+            }
+        }
+    }
+
+    return -1; // No matching brace found
 }
 
 // ── Prompt Template System (Epic 4) ──────────────────────
@@ -1014,10 +1063,18 @@ async function generateImage(modeName, characterOverride) {
             throw new Error('No workflow JSON configured.');
         }
 
+        // Log raw workflow template (first 300 chars) for debugging
+        console.log('[BetterImgGen] Raw workflow JSON template (first 300 chars):', workflowStr.substring(0, 300));
+        console.log('[BetterImgGen] Workflow JSON template length:', workflowStr.length);
+
         // 11. Substitute placeholders (before validation to allow %placeholders% in template)
         const workflow = substitutePlaceholders(
             workflowStr, s, loraPrompt, s.negativePrompt, s.seed
         );
+
+        // Log after substitution for debugging
+        console.log('[BetterImgGen] Workflow JSON after substitution (first 300 chars):', workflow.substring(0, 300));
+        console.log('[BetterImgGen] Workflow JSON after substitution length:', workflow.length);
 
         // 12. Validate workflow after substitution
         const validated = validateWorkflowJson(workflow);
@@ -1361,10 +1418,18 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
             throw new Error('No workflow JSON configured.');
         }
 
+        // Log raw workflow template (first 300 chars) for debugging
+        console.log('[BetterImgGen] Raw workflow JSON template (first 300 chars):', workflowStr.substring(0, 300));
+        console.log('[BetterImgGen] Workflow JSON template length:', workflowStr.length);
+
         // 10. Substitute placeholders (before validation to allow %placeholders% in template)
         const workflow = substitutePlaceholders(
             workflowStr, s, loraPrompt, s.negativePrompt, s.seed
         );
+
+        // Log after substitution for debugging
+        console.log('[BetterImgGen] Workflow JSON after substitution (first 300 chars):', workflow.substring(0, 300));
+        console.log('[BetterImgGen] Workflow JSON after substitution length:', workflow.length);
 
         // 11. Validate workflow after substitution
         const validated = validateWorkflowJson(workflow);
