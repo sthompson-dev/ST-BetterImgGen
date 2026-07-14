@@ -3,3 +3,4 @@ __pycache__/
 *.py
 PRD.md
 Plan.txt
+.claude/
