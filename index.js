@@ -961,25 +961,29 @@ async function generateImage(modeName, characterOverride) {
             sdPrompt = await callLlmForPrompt(llmPrompt);
         }
 
-        // 7. Edit prompt before generation if enabled
-        if (s.editBeforeGenerate && sdPrompt) {
-            const edited = await showPromptEditor(sdPrompt);
+        // 7. Assemble final positive prompt with character tags and style prefix
+        // (Do this before the editor so the user sees resolved tags, not [[Name]] placeholders)
+        const charTags = getCharacterTags();
+        const finalPrompt = assembleFinalPositivePrompt(sdPrompt, charTags, s.stylePrefix);
+
+        // 8. Edit prompt before generation if enabled
+        if (s.editBeforeGenerate && finalPrompt) {
+            const edited = await showPromptEditor(finalPrompt);
             if (edited === null) {
                 isGenerationRunning = false;
                 toastr.info('Generation cancelled.');
                 return;
             }
             sdPrompt = edited;
+        } else {
+            sdPrompt = finalPrompt;
         }
 
-        // 8. Assemble final positive prompt with character tags and style prefix
-        const charTags = getCharacterTags();
-        const finalPrompt = assembleFinalPositivePrompt(sdPrompt, charTags, s.stylePrefix);
-
         // 9. Apply LoRA keyword matching and replacement
+        // sdPrompt is the final assembled prompt (possibly edited by user)
         const loraRules = getLoraRules();
         const matchedRules = [];
-        let loraPrompt = finalPrompt;
+        let loraPrompt = sdPrompt;
         for (const rule of loraRules) {
             if (matchLoraKeywords(loraPrompt, rule)) {
                 matchedRules.push(rule);
@@ -1304,25 +1308,29 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
             sdPrompt = await callLlmForPrompt(llmPrompt);
         }
 
-        // 6. Edit prompt before generation if enabled
-        if (s.editBeforeGenerate && sdPrompt) {
-            const edited = await showPromptEditor(sdPrompt);
+        // 6. Assemble final positive prompt with character tags and style prefix
+        // (Do this before the editor so the user sees resolved tags, not [[Name]] placeholders)
+        const charTags = getCharacterTags();
+        const finalPrompt = assembleFinalPositivePrompt(sdPrompt, charTags, s.stylePrefix);
+
+        // 7. Edit prompt before generation if enabled
+        if (s.editBeforeGenerate && finalPrompt) {
+            const edited = await showPromptEditor(finalPrompt);
             if (edited === null) {
                 isGenerationRunning = false;
                 toastr.info('Generation cancelled.');
                 return;
             }
             sdPrompt = edited;
+        } else {
+            sdPrompt = finalPrompt;
         }
 
-        // 7. Assemble final positive prompt with character tags and style prefix
-        const charTags = getCharacterTags();
-        const finalPrompt = assembleFinalPositivePrompt(sdPrompt, charTags, s.stylePrefix);
-
         // 8. Apply LoRA keyword matching and replacement
+        // sdPrompt is the final assembled prompt (possibly edited by user)
         const loraRules = getLoraRules();
         const matchedRules = [];
-        let loraPrompt = finalPrompt;
+        let loraPrompt = sdPrompt;
         for (const rule of loraRules) {
             if (matchLoraKeywords(loraPrompt, rule)) {
                 matchedRules.push(rule);
