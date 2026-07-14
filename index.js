@@ -1,5 +1,5 @@
 // ============================================================
-// ST-BetterImgGen v1.0.1 — ComfyUI Image Generation Extension for SillyTavern 
+// ST-BetterImgGen v1.0.2 — ComfyUI Image Generation Extension for SillyTavern 
 // Extension ID: ST-BetterImgGen
 // Display Name: Better Image Generation
 // ============================================================
