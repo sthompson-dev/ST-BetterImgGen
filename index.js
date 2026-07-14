@@ -547,9 +547,27 @@ function validateWorkflowJson(jsonString) {
                     }
                 } catch (e) {
                     console.error('[BetterImgGen] Extraction attempt failed.');
-                    console.error('[BetterImgGen] Extracted first 200 chars:', extracted.substring(0, 200));
                     console.error('[BetterImgGen] Extraction parse error:', e.message);
-                    console.error('[BetterImgGen] firstBrace:', firstBrace, 'matchEnd:', matchEnd);
+                    console.error('[BetterImgGen] firstBrace:', firstBrace, 'matchEnd:', matchEnd, 'extracted length:', extracted.length);
+
+                    // Log the FULL extracted JSON for diagnosis
+                    console.log('[BetterImgGen] === FULL EXTRACTED JSON ===');
+                    console.log(extracted);
+                    console.log('[BetterImgGen] === END FULL EXTRACTED JSON ===');
+
+                    // Also log the area around the error location (line 34)
+                    const lines = extracted.split('\n');
+                    const errLineMatch = e.message.match(/line (\d+)/);
+                    if (errLineMatch) {
+                        const errLine = parseInt(errLineMatch[1]);
+                        const start = Math.max(0, errLine - 5);
+                        const end = Math.min(lines.length, errLine + 4);
+                        console.error('[BetterImgGen] Lines ' + (start + 1) + '-' + end + ' (error at line ' + errLine + '):');
+                        for (let i = start; i < end; i++) {
+                            const marker = (i + 1) === errLine ? ' >>> ' : '     ';
+                            console.error(marker + 'Line ' + (i + 1) + ': ' + lines[i]);
+                        }
+                    }
                 }
             } else {
                 console.error('[BetterImgGen] Could not find matching closing brace.');
