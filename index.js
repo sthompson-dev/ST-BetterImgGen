@@ -177,7 +177,7 @@ function addToWandMenu(retries = 20) {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            openSettingsModal();
+            toggleWandSubmenu(e.currentTarget);
         });
         console.log('[BetterImgGen] Added to wand menu');
     }
@@ -194,7 +194,7 @@ function registerSlashCommands() {
                 triggerGeneration(mode);
                 return '';
             },
-            helpString: 'Generate an image using Better Image Generation. &lt;mode&gt; - The generation mode name (e.g., Scene, Portrait).',
+            helpString: 'Generate an image using Better Image Generation. <mode> - The generation mode name (e.g., Scene, Portrait).',
             unnamedArgumentList: [
                 new SlashCommandArgument(
                     'The generation mode name (e.g., Scene, Portrait)',
@@ -204,6 +204,19 @@ function registerSlashCommands() {
                     'Scene',
                 ),
             ],
+            returns: 'void',
+        }),
+    );
+
+    SlashCommandParser.addCommandObject(
+        SlashCommand.fromProps({
+            name: 'bimg-character',
+            callback: () => {
+                showCharacterPortraitDialog();
+                return '';
+            },
+            helpString: 'Open the character portrait dialog to generate images for multiple characters.',
+            unnamedArgumentList: [],
             returns: 'void',
         }),
     );
@@ -797,7 +810,7 @@ async function postImageToChat(imageDataUrl, prompt, seed) {
 
 let generationHistory = [];
 
-async function generateImage(modeName) {
+async function generateImage(modeName, characterOverride) {
     if (isGenerationRunning) {
         toastr.warning('A generation is already in progress.');
         return;
@@ -820,11 +833,18 @@ async function generateImage(modeName) {
         const templates = getPromptTemplates();
         const template = templates[templateIndex] || templates[0];
 
-        // 2. Get chat context
+        // 2. If a character override is provided, replace [[character]] in the template instruction
+        let effectiveInstruction = template.instruction;
+        if (characterOverride) {
+            effectiveInstruction = effectiveInstruction.replace(/\[\[character\]\]/gi, characterOverride);
+        }
+
+        // 3. Get chat context
         const chatContext = template.name === 'No Context' ? '' : getChatContext(modeName);
 
-        // 3. Build LLM prompt
-        const llmPrompt = buildLlmPrompt(template, chatContext);
+        // 4. Build LLM prompt using the (possibly modified) instruction
+        const effectiveTemplate = { ...template, instruction: effectiveInstruction };
+        const llmPrompt = buildLlmPrompt(effectiveTemplate, chatContext);
 
         // 4. Call LLM for SD prompt
         let sdPrompt = '';
@@ -957,6 +977,34 @@ async function showPromptEditor(prompt) {
 
 // ── Wand Menu (Epic 8) ──────────────────────────────────
 
+/**
+ * Toggle the wand submenu on/off, positioning it below the button.
+ */
+function toggleWandSubmenu(btn) {
+    const existing = document.getElementById('better-img-gen-wand-menu');
+    if (existing && existing.style.display === 'block') {
+        existing.style.display = 'none';
+        return;
+    }
+
+    const menu = buildWandMenu();
+    const rect = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.display = 'block';
+
+    // Close on click outside
+    const closeHandler = (e) => {
+        if (!menu.contains(e.target) && e.target !== btn) {
+            menu.style.display = 'none';
+            document.removeEventListener('click', closeHandler);
+        }
+    };
+    // Use setTimeout to avoid the same click event closing it
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+}
+
 function buildWandMenu() {
     const modes = getGenerationModes();
     const menuId = 'better-img-gen-wand-menu';
@@ -971,6 +1019,9 @@ function buildWandMenu() {
     `).join('');
 
     itemsHtml += `
+        <div class="list-group-item flex-container" id="better-img-gen-wand-char-portraits" style="cursor:pointer;">
+            <span>👥 Character Portraits...</span>
+        </div>
         <div class="list-group-item flex-container" id="better-img-gen-wand-configure" style="cursor:pointer;">
             <span>⚙ Configure...</span>
         </div>
@@ -996,6 +1047,12 @@ function buildWandMenu() {
     document.getElementById('better-img-gen-wand-configure').addEventListener('click', () => {
         menu.style.display = 'none';
         openSettingsModal();
+    });
+
+    // Wire Character Portraits click
+    document.getElementById('better-img-gen-wand-char-portraits').addEventListener('click', () => {
+        menu.style.display = 'none';
+        showCharacterPortraitDialog();
     });
 
     // Wire Generate Character Tags click
@@ -1063,6 +1120,79 @@ function openTagGenerationDialog() {
             toastr.error('Tag generation failed: ' + err.message);
         }
     });
+}
+
+// ── Character Portrait Batch Generation ──────────────────
+
+/**
+ * Show a dialog for entering character names to generate portraits for.
+ */
+function showCharacterPortraitDialog() {
+    const modes = getGenerationModes();
+    const modeOptions = modes.map((m, i) =>
+        `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${m.description ? ' — ' + escapeHtml(m.description) : ''}</option>`
+    ).join('');
+
+    const dialogHtml = `
+        <div id="better-img-gen-char-portrait-dialog" title="Character Portraits">
+            <div style="padding:12px;">
+                <div class="better-img-gen-field" style="margin-bottom:12px;">
+                    <label>Character Names</label>
+                    <input type="text" class="better-img-gen-input" id="better-img-gen-char-portrait-names"
+                           placeholder="Enter character names separated by spaces (e.g. Alice Bob Charlie)">
+                    <div style="color:#8a7a60;font-size:11px;margin-top:4px;">First names only, space-separated.</div>
+                </div>
+                <div class="better-img-gen-field" style="margin-bottom:12px;">
+                    <label>Generation Mode</label>
+                    <select class="better-img-gen-select" id="better-img-gen-char-portrait-mode">
+                        ${modeOptions}
+                    </select>
+                </div>
+                <button class="better-img-gen-btn better-img-gen-btn-primary" id="better-img-gen-char-portrait-generate-btn"
+                        style="width:100%;">Generate Portraits</button>
+            </div>
+        </div>
+    `;
+
+    $('body').append(dialogHtml);
+    const dlg = $('#better-img-gen-char-portrait-dialog').dialog({
+        width: 450,
+        modal: true,
+        close: function() { $(this).dialog('destroy').remove(); }
+    });
+
+    document.getElementById('better-img-gen-char-portrait-generate-btn').addEventListener('click', async () => {
+        const namesStr = document.getElementById('better-img-gen-char-portrait-names').value.trim();
+        if (!namesStr) {
+            toastr.warning('Please enter at least one character name.');
+            return;
+        }
+
+        const names = namesStr.split(/\s+/).filter(n => n.length > 0);
+        const modeSelect = document.getElementById('better-img-gen-char-portrait-mode');
+        const modeName = modeSelect.value;
+
+        dlg.dialog('close');
+        await generateCharacterPortraits(names, modeName);
+    });
+}
+
+/**
+ * Generate images for multiple characters by iterating through each name
+ * and replacing [[character]] in the prompt template instruction.
+ * @param {string[]} characterNames - Array of character first names
+ * @param {string} modeName - Generation mode name
+ */
+async function generateCharacterPortraits(characterNames, modeName) {
+    const total = characterNames.length;
+
+    for (let i = 0; i < total; i++) {
+        const name = characterNames[i];
+        toastr.info(`Generating portrait ${i + 1}/${total}: ${name}`);
+        await generateImage(modeName, name);
+    }
+
+    toastr.success(`Finished generating ${total} portrait(s).`);
 }
 
 // ── Generation Pipeline Wrapper ──────────────────────────
