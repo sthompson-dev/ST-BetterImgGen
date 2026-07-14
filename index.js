@@ -255,6 +255,7 @@ async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = 
 
     const response = await fetch(proxyEndpoint, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
     });
@@ -691,6 +692,7 @@ async function fetchGeneratedImage(imageInfo, comfyUrl) {
     try {
         const result = await fetch(PROXY_BASE + '/proxy', {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 comfyuiUrl: comfyUrl,
