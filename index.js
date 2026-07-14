@@ -756,6 +756,7 @@ function injectLoraChain(workflow, matchedRules) {
     let currentClipId = clipOutput.nodeId;
     let currentClipOutput = clipOutput.outputIndex;
 
+    const loraNodeIds = new Set();
     matchedRules.forEach((rule, i) => {
         const loraId = injectLoraNode(
             workflow, rule,
@@ -763,11 +764,37 @@ function injectLoraChain(workflow, matchedRules) {
             currentClipId, currentClipOutput,
             i
         );
+        loraNodeIds.add(loraId);
         currentModelId = loraId;
         currentModelOutput = 0;
         currentClipId = loraId;
         currentClipOutput = 1;
     });
+
+    // Rewire downstream consumers: any node (except the LoRA nodes we just
+    // injected) that references the original checkpoint's MODEL or CLIP output
+    // must be updated to use the last LoRA node's output instead.  Without
+    // this the LoRA chain is created but nothing actually consumes its outputs.
+    const lastModelId = currentModelId;
+    const lastModelOutput = currentModelOutput;
+    const lastClipId = currentClipId;
+    const lastClipOutput = currentClipOutput;
+
+    for (const [nodeId, node] of Object.entries(workflow)) {
+        if (loraNodeIds.has(nodeId)) continue;
+        if (!node.inputs) continue;
+
+        for (const [inputName, inputValue] of Object.entries(node.inputs)) {
+            if (Array.isArray(inputValue) && inputValue.length === 2) {
+                const [srcNodeId, srcOutputIndex] = inputValue;
+                if (srcNodeId === modelOutput.nodeId && srcOutputIndex === modelOutput.outputIndex) {
+                    node.inputs[inputName] = [lastModelId, lastModelOutput];
+                } else if (srcNodeId === clipOutput.nodeId && srcOutputIndex === clipOutput.outputIndex) {
+                    node.inputs[inputName] = [lastClipId, lastClipOutput];
+                }
+            }
+        }
+    }
 
     return workflow;
 }
