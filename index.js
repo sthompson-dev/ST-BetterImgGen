@@ -853,16 +853,24 @@ function substitutePlaceholders(workflowJson, settings, positivePrompt, negative
     let result = workflowJson;
     const actualSeed = seed === -1 ? Math.floor(Math.random() * 2147483647) : seed;
 
+    // JSON-escape string values that may contain special characters (quotes,
+    // backslashes, newlines). We strip the outer quotes that JSON.stringify adds
+    // so the escaped value slots cleanly into an already-quoted JSON string:
+    //   "text": "%positive_prompt%"  →  "text": "escaped text here"
+    function esc(s) {
+        return JSON.stringify(s).slice(1, -1);
+    }
+
     const replacements = {
         '%seed%': String(actualSeed),
         '%steps%': String(settings.steps),
         '%cfg%': String(settings.cfgScale),
-        '%sampler%': settings.sampler || 'euler',
-        '%scheduler%': settings.scheduler || 'normal',
-        '%model%': settings.model || '',
-        '%vae%': settings.vae || '',
-        '%positive_prompt%': positivePrompt || '',
-        '%negative_prompt%': negativePrompt || '',
+        '%sampler%': esc(settings.sampler || 'euler'),
+        '%scheduler%': esc(settings.scheduler || 'normal'),
+        '%model%': esc(settings.model || ''),
+        '%vae%': esc(settings.vae || ''),
+        '%positive_prompt%': esc(positivePrompt || ''),
+        '%negative_prompt%': esc(negativePrompt || ''),
         '%width%': String(settings.width),
         '%height%': String(settings.height),
         '%denoising_strength%': String(settings.denoisingStrength || 0.7),
