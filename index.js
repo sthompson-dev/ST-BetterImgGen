@@ -253,8 +253,14 @@ async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = 
     if (query) payload.query = query;
     if (body !== undefined) payload.body = body;
 
-    // Include ST's auth headers (CSRF token, etc.)
-    const authHeaders = typeof getRequestHeaders === 'function' ? getRequestHeaders() : {};
+    // Read CSRF token from the _csrf cookie set by SillyTavern
+    function getCsrfToken() {
+        const match = document.cookie.match(/(?:^|;\s*)_csrf=([^;]*)/);
+        return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    const csrfToken = getCsrfToken();
+    const authHeaders = csrfToken ? { 'X-CSRF-Token': csrfToken } : {};
 
     const response = await fetch(proxyEndpoint, {
         method: 'POST',
