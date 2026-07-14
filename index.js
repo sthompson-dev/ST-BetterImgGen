@@ -530,6 +530,23 @@ function validateWorkflowJson(jsonString) {
         }
         return { valid: true, data: parsed };
     } catch (err) {
+        // Try to extract JSON object from the string — handles cases where
+        // placeholder substitution leaves garbage before/after the JSON (e.g.,
+        // %seed% placed before the opening brace in the workflow template).
+        const firstBrace = jsonString.indexOf('{');
+        const lastBrace = jsonString.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            try {
+                const extracted = jsonString.substring(firstBrace, lastBrace + 1);
+                const parsed = JSON.parse(extracted);
+                if (parsed && typeof parsed === 'object') {
+                    console.warn('[BetterImgGen] Workflow JSON had extra characters before/after the JSON object; extracted valid JSON.');
+                    return { valid: true, data: parsed };
+                }
+            } catch (e) {
+                // Fall through to original error
+            }
+        }
         console.error('[BetterImgGen] validateWorkflowJson failed. First 200 chars of input:', jsonString.substring(0, 200));
         console.error('[BetterImgGen] Input length:', jsonString.length);
         return { valid: false, error: 'Invalid JSON: ' + err.message };
@@ -1009,7 +1026,7 @@ async function generateImage(modeName, characterOverride) {
         }
 
         // 13. Inject LoRA nodes into workflow
-        let finalWorkflow = JSON.parse(workflow);
+        let finalWorkflow = validated.data;
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
         const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
@@ -1356,7 +1373,7 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
         }
 
         // 12. Inject LoRA nodes into workflow
-        let finalWorkflow = JSON.parse(workflow);
+        let finalWorkflow = validated.data;
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
         const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
