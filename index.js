@@ -223,14 +223,60 @@ function refreshCharacterTags() {
     // Will fetch current characters and their tags when modal opens
 }
 
+// ── Server Proxy Helper ───────────────────────────────────
+
+// Mount point for the extension's server-side router.
+// SillyTavern mounts server extensions at /api/plugins/<name>/
+const PROXY_BASE = '/api/plugins/st-betterimgen';
+
+/**
+ * Send a request to the ComfyUI proxy endpoint on the SillyTavern server.
+ * This avoids CORS and mixed-content issues in the browser.
+ *
+ * @param {string} comfyUrl - The base ComfyUI URL (e.g. http://127.0.0.1:8188)
+ * @param {string} endpoint - The ComfyUI endpoint path (e.g. /object_info)
+ * @param {object} [options]
+ * @param {string} [options.method] - HTTP method (default GET)
+ * @param {object} [options.query] - URL query params
+ * @param {any} [options.body] - JSON body for POST/PUT
+ * @returns {Promise<any>} The response data from ComfyUI
+ */
+async function proxyFetch(comfyUrl, endpoint, { method = 'GET', query, body } = {}) {
+    const proxyEndpoint = PROXY_BASE + '/proxy';
+
+    const payload = {
+        comfyuiUrl: comfyUrl,
+        endpoint: endpoint,
+        method: method,
+    };
+
+    if (query) payload.query = query;
+    if (body !== undefined) payload.body = body;
+
+    const response = await fetch(proxyEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Proxy server returned HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    if (!result.ok) {
+        throw new Error(result.error || `ComfyUI returned HTTP ${result.status}`);
+    }
+
+    return result.data;
+}
+
 // ── ComfyUI Connection (Epic 3) ──────────────────────────
 
 async function fetchObjectInfo(comfyUrl) {
-    const url = comfyUrl.replace(/\/+$/, '') + '/object_info';
     try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
+        const data = await proxyFetch(comfyUrl, '/object_info', { method: 'GET' });
         return data;
     } catch (err) {
         throw new Error(`Connection failed: ${err.message}`);
@@ -591,32 +637,28 @@ function substitutePlaceholders(workflowJson, settings, positivePrompt, negative
 }
 
 async function submitToComfyUI(workflowJson, comfyUrl) {
-    const url = comfyUrl.replace(/\/+$/, '') + '/prompt';
-    const body = JSON.stringify({ prompt: workflowJson });
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body,
-    });
-
-    if (!response.ok) throw new Error(`ComfyUI returned HTTP ${response.status}`);
-    const data = await response.json();
-    if (data.error) throw new Error(data.error.message || data.error);
-    return data.prompt_id;
+    try {
+        const data = await proxyFetch(comfyUrl, '/prompt', {
+            method: 'POST',
+            body: { prompt: workflowJson },
+        });
+        if (data.error) throw new Error(data.error.message || data.error);
+        return data.prompt_id;
+    } catch (err) {
+        throw new Error(`ComfyUI submit failed: ${err.message}`);
+    }
 }
 
 async function pollForResult(promptId, comfyUrl) {
-    const url = comfyUrl.replace(/\/+$/, '') + '/history/' + promptId;
     const maxAttempts = 300; // 5 minutes at 1s intervals
     const delay = 1000;
 
     for (let i = 0; i < maxAttempts; i++) {
         await new Promise(resolve => setTimeout(resolve, delay));
         try {
-            const response = await fetch(url);
-            if (!response.ok) continue;
-            const data = await response.json();
+            const data = await proxyFetch(comfyUrl, '/history/' + promptId, {
+                method: 'GET',
+            });
             const history = data[promptId];
             if (history && history.outputs) {
                 const outputs = history.outputs;
@@ -644,18 +686,45 @@ async function pollForResult(promptId, comfyUrl) {
 }
 
 async function fetchGeneratedImage(imageInfo, comfyUrl) {
-    const baseUrl = comfyUrl.replace(/\/+$/, '') + '/view';
-    const params = new URLSearchParams({
-        filename: imageInfo.filename,
-        subfolder: imageInfo.subfolder,
-        type: imageInfo.type,
-    });
-    const url = baseUrl + '?' + params.toString();
+    // For fetching the image blob, we need the raw binary data (base64).
+    // Use the proxy with binary flag to get it.
+    try {
+        const result = await fetch(PROXY_BASE + '/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                comfyuiUrl: comfyUrl,
+                endpoint: '/view',
+                method: 'GET',
+                query: {
+                    filename: imageInfo.filename,
+                    subfolder: imageInfo.subfolder,
+                    type: imageInfo.type,
+                },
+                binary: true,
+            }),
+        });
 
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Failed to fetch generated image.');
-    const blob = await response.blob();
-    return blob;
+        if (!result.ok) {
+            throw new Error(`Proxy returned HTTP ${result.status}`);
+        }
+
+        const json = await result.json();
+        if (!json.ok) {
+            throw new Error(json.error || 'Image fetch failed');
+        }
+
+        // Decode base64 to binary
+        const binaryStr = atob(json.data);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+        }
+
+        return new Blob([bytes], { type: json.contentType || 'image/png' });
+    } catch (err) {
+        throw new Error(`Failed to fetch generated image: ${err.message}`);
+    }
 }
 
 async function saveImageToStorage(imageBlob) {
