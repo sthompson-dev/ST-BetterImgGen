@@ -1781,17 +1781,7 @@ function openSettingsModal() {
     // Prompts: Save and Delete (delegated)
     wirePromptsPanelEvents(modalId);
 
-    // LoRA: Add rule
-    document.getElementById('better-img-gen-add-lora-rule').addEventListener('click', () => {
-        const s = getSettings();
-        s.loraRules.push({ keywords: '', model: '', replacement: '' });
-        saveSettingsDebounced();
-        const panel = document.getElementById('better-img-gen-panel-lora');
-        panel.innerHTML = buildLoraPanel();
-        wireLoraPanelEvents();
-    });
-
-    // LoRA: Remove rule (delegated)
+    // LoRA: Wire events (delegated)
     wireLoraPanelEvents();
 
     // Characters: wire tag operations (delegated)
@@ -1825,6 +1815,19 @@ function wirePromptsPanelEvents(modalId) {
 }
 
 function wireLoraPanelEvents() {
+    // LoRA: Add rule
+    const addBtn = document.getElementById('better-img-gen-add-lora-rule');
+    if (addBtn) {
+        addBtn.addEventListener('click', () => {
+            const s = getSettings();
+            s.loraRules.push({ keywords: '', model: '', replacement: '' });
+            saveSettingsDebounced();
+            const panel = document.getElementById('better-img-gen-panel-lora');
+            panel.innerHTML = buildLoraPanel();
+            wireLoraPanelEvents();
+        });
+    }
+
     // LoRA: Remove rule
     document.querySelectorAll('.better-img-gen-lora-remove').forEach(btn => {
         btn.addEventListener('click', function () {
