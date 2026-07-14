@@ -1,5 +1,5 @@
 // ============================================================
-// ST-BetterImgGen v1.0.5 — ComfyUI Image Generation Extension for SillyTavern 
+// ST-BetterImgGen v1.0.6 — ComfyUI Image Generation Extension for SillyTavern 
 // Extension ID: ST-BetterImgGen
 // Display Name: Better Image Generation
 // ============================================================
@@ -726,7 +726,7 @@ function getChatContext(modeName) {
     // Get recent chat messages from SillyTavern's context
     const context = getContext();
     if (!context || !context.chat) return '';
-    const messages = context.chat.slice(-10);
+        const messages = context.chat.slice(-5);
     return messages.map(msg => {
         const role = msg.is_user ? 'User' : msg.name || 'Character';
         return `${role}: ${msg.mes}`;
@@ -938,13 +938,16 @@ async function generateImage(modeName, characterOverride) {
         const effectiveTemplate = { ...template, instruction: effectiveInstruction };
         const llmPrompt = buildLlmPrompt(effectiveTemplate, chatContext);
 
-        // 4. Call LLM for SD prompt
+        // 5. Log the full LLM prompt to console
+        console.log('[BetterImgGen] Full LLM prompt being sent:\n' + llmPrompt);
+
+        // 6. Call LLM for SD prompt
         let sdPrompt = '';
         if (llmPrompt) {
             sdPrompt = await callLlmForPrompt(llmPrompt);
         }
 
-        // 5. Edit prompt before generation if enabled
+        // 7. Edit prompt before generation if enabled
         if (s.editBeforeGenerate && sdPrompt) {
             const edited = await showPromptEditor(sdPrompt);
             if (edited === null) {
@@ -955,11 +958,11 @@ async function generateImage(modeName, characterOverride) {
             sdPrompt = edited;
         }
 
-        // 6. Assemble final positive prompt with character tags and style prefix
+        // 8. Assemble final positive prompt with character tags and style prefix
         const charTags = getCharacterTags();
         const finalPrompt = assembleFinalPositivePrompt(sdPrompt, charTags, s.stylePrefix);
 
-        // 7. Apply LoRA keyword matching and replacement
+        // 9. Apply LoRA keyword matching and replacement
         const loraRules = getLoraRules();
         const matchedRules = [];
         let loraPrompt = finalPrompt;
@@ -970,7 +973,7 @@ async function generateImage(modeName, characterOverride) {
             }
         }
 
-        // 8. Get workflow JSON
+        // 10. Get workflow JSON
         const workflowStr = getWorkflowJson();
         if (!workflowStr) {
             throw new Error('No workflow JSON configured.');
@@ -980,31 +983,31 @@ async function generateImage(modeName, characterOverride) {
             throw new Error('Invalid workflow JSON: ' + validated.error);
         }
 
-        // 9. Substitute placeholders
+        // 11. Substitute placeholders
         let workflow = substitutePlaceholders(
             workflowStr, s, loraPrompt, s.negativePrompt, s.seed
         );
 
-        // 10. Inject LoRA nodes into workflow
+        // 12. Inject LoRA nodes into workflow
         let finalWorkflow = JSON.parse(workflow);
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
         const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
-        // 11. Submit to ComfyUI
+        // 13. Submit to ComfyUI
         const promptId = await submitToComfyUI(finalWorkflowStr, s.comfyuiUrl);
 
-        // 12. Poll for result
+        // 14. Poll for result
         const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
 
-        // 13. Fetch the image
+        // 15. Fetch the image
         const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
 
-        // 14. Save and post to chat
+        // 16. Save and post to chat
         const imageDataUrl = await saveImageToStorage(imageBlob);
         const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
         await postImageToChat(imageDataUrl, loraPrompt, actualSeed);
 
-        // 15. Store in generation history for swiping
+        // 17. Store in generation history for swiping
         generationHistory.push({
             imagePath: imageDataUrl,
             prompt: loraPrompt,
@@ -1276,13 +1279,16 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
         const effectiveTemplate = { ...template, instruction: effectiveInstruction };
         const llmPrompt = buildLlmPrompt(effectiveTemplate, chatContext);
 
-        // 4. Call LLM for SD prompt
+        // 4. Log the full LLM prompt to console
+        console.log('[BetterImgGen] Full LLM prompt being sent:\n' + llmPrompt);
+
+        // 5. Call LLM for SD prompt
         let sdPrompt = '';
         if (llmPrompt) {
             sdPrompt = await callLlmForPrompt(llmPrompt);
         }
 
-        // 5. Edit prompt before generation if enabled
+        // 6. Edit prompt before generation if enabled
         if (s.editBeforeGenerate && sdPrompt) {
             const edited = await showPromptEditor(sdPrompt);
             if (edited === null) {
@@ -1293,11 +1299,11 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
             sdPrompt = edited;
         }
 
-        // 6. Assemble final positive prompt with character tags and style prefix
+        // 7. Assemble final positive prompt with character tags and style prefix
         const charTags = getCharacterTags();
         const finalPrompt = assembleFinalPositivePrompt(sdPrompt, charTags, s.stylePrefix);
 
-        // 7. Apply LoRA keyword matching and replacement
+        // 8. Apply LoRA keyword matching and replacement
         const loraRules = getLoraRules();
         const matchedRules = [];
         let loraPrompt = finalPrompt;
@@ -1308,7 +1314,7 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
             }
         }
 
-        // 8. Get workflow JSON
+        // 9. Get workflow JSON
         const workflowStr = getWorkflowJson();
         if (!workflowStr) {
             throw new Error('No workflow JSON configured.');
@@ -1318,31 +1324,31 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
             throw new Error('Invalid workflow JSON: ' + validated.error);
         }
 
-        // 9. Substitute placeholders
+        // 10. Substitute placeholders
         let workflow = substitutePlaceholders(
             workflowStr, s, loraPrompt, s.negativePrompt, s.seed
         );
 
-        // 10. Inject LoRA nodes into workflow
+        // 11. Inject LoRA nodes into workflow
         let finalWorkflow = JSON.parse(workflow);
         finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
         const finalWorkflowStr = JSON.stringify(finalWorkflow);
 
-        // 11. Submit to ComfyUI
+        // 12. Submit to ComfyUI
         const promptId = await submitToComfyUI(finalWorkflowStr, s.comfyuiUrl);
 
-        // 12. Poll for result
+        // 13. Poll for result
         const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
 
-        // 13. Fetch the image
+        // 14. Fetch the image
         const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
 
-        // 14. Save and post to chat
+        // 15. Save and post to chat
         const imageDataUrl = await saveImageToStorage(imageBlob);
         const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
         await postImageToChat(imageDataUrl, loraPrompt, actualSeed);
 
-        // 15. Store in generation history for swiping
+        // 16. Store in generation history for swiping
         generationHistory.push({
             imagePath: imageDataUrl,
             prompt: loraPrompt,
