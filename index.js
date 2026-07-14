@@ -7,6 +7,12 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, generateQuietPrompt } from '../../../../script.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+
+// ── Verify imports ───────────────────────────────────────
+console.log('[BetterImgGen] generateQuietPrompt imported:', typeof generateQuietPrompt);
+if (typeof generateQuietPrompt !== 'function') {
+    console.error('[BetterImgGen] generateQuietPrompt is NOT a function — LLM calls will fail');
+}
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 
@@ -178,9 +184,9 @@ function addToWandMenu(retries = 20) {
 
     const html = `
         <div id="${EXTENSION_ID}-wand-entry" class="list-group-item" title="Better Image Generation">
-            <span>🎨 Better Image Generation</span>
-        </div>
-    `;
+                    <span>🎨 Better Image Generation</span>
+                </div>
+            `;
     wandMenu.insertAdjacentHTML('beforeend', html);
 
     const el = document.getElementById(`${EXTENSION_ID}-wand-entry`);
@@ -193,6 +199,17 @@ function addToWandMenu(retries = 20) {
     }
 
     console.log('[BetterImgGen] Added wand entry: Better Image Generation');
+
+    // Log available SillyTavern context info
+    try {
+        const ctx = getContext();
+        console.log('[BetterImgGen] ST context available:', !!ctx);
+        console.log('[BetterImgGen] ST context.characterId:', ctx?.characterId);
+        console.log('[BetterImgGen] ST context.characters length:', ctx?.characters?.length ?? 0);
+        console.log('[BetterImgGen] ST context.chat length:', ctx?.chat?.length ?? 0);
+    } catch (e) {
+        console.log('[BetterImgGen] Could not access ST context at init (expected before full load):', e.message);
+    }
 }
 
 /**
@@ -712,10 +729,20 @@ function buildLlmPrompt(template, chatContext) {
 
 async function callLlmForPrompt(llmPrompt) {
     // Use SillyTavern's built-in quiet text generation API
+    console.log('[BetterImgGen] callLlmForPrompt called');
+    console.log('[BetterImgGen] Prompt length:', llmPrompt?.length || 0);
+    console.log('[BetterImgGen] Prompt preview (first 300 chars):', llmPrompt?.substring(0, 300));
     try {
         const result = await generateQuietPrompt({ quietPrompt: llmPrompt });
+        console.log('[BetterImgGen] generateQuietPrompt result type:', typeof result);
+        console.log('[BetterImgGen] Result length:', result?.length || 0);
+        console.log('[BetterImgGen] Result preview (first 300 chars):', result?.substring(0, 300));
         return result || '';
     } catch (err) {
+        console.error('[BetterImgGen] generateQuietPrompt threw error:', err);
+        console.error('[BetterImgGen] Error name:', err.name);
+        console.error('[BetterImgGen] Error message:', err.message);
+        console.error('[BetterImgGen] Error stack:', err.stack);
         throw new Error('LLM generation failed: ' + err.message);
     }
 }
@@ -1064,25 +1091,37 @@ function openTagGenerationDialog() {
             let charCard = '';
             let chatMessages = '';
 
+            console.log('[BetterImgGen] Tag generation for char:', charName);
+            console.log('[BetterImgGen] Context available:', !!context);
+            console.log('[BetterImgGen] Characters array length:', context?.characters?.length ?? 0);
+
             if (context && context.characters) {
                 const char = context.characters.find(c =>
                     c.name.toLowerCase() === charName.toLowerCase()
                 );
                 if (char) {
                     charCard = char.description || char.data?.description || '';
+                    console.log('[BetterImgGen] Char found, card length:', charCard.length);
+                } else {
+                    console.warn('[BetterImgGen] Character not found in context:', charName);
                 }
             }
 
             chatMessages = getChatContext('');
+            console.log('[BetterImgGen] Chat messages length:', chatMessages.length);
 
             const genPrompt = getCharacterTagGenPrompt();
             const fullPrompt = genPrompt + '\n\nCharacter: ' + charName + '\nDescription: ' + charCard + '\n\nChat:\n' + chatMessages;
+            console.log('[BetterImgGen] Full prompt length:', fullPrompt.length);
+            console.log('[BetterImgGen] Calling callLlmForPrompt...');
             const tags = await callLlmForPrompt(fullPrompt);
+            console.log('[BetterImgGen] callLlmForPrompt returned tags length:', tags?.length ?? 0);
 
             saveCharacterTags(charName, tags.trim());
             toastr.success(`Tags generated for ${charName}`);
             dlg.dialog('close');
         } catch (err) {
+            console.error('[BetterImgGen] Tag generation caught error:', err);
             toastr.error('Tag generation failed: ' + err.message);
         }
     });
