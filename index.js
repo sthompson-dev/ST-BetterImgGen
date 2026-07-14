@@ -872,11 +872,14 @@ function substitutePlaceholders(workflowJson, settings, positivePrompt, negative
     const actualSeed = seed === -1 ? Math.floor(Math.random() * 2147483647) : seed;
 
     // JSON-escape string values that may contain special characters (quotes,
-    // backslashes, newlines). We strip the outer quotes that JSON.stringify adds
-    // so the escaped value slots cleanly into an already-quoted JSON string:
-    //   "text": "%positive_prompt%"  →  "text": "escaped text here"
+    // backslashes, newlines). We use JSON.stringify to produce a complete,
+    // properly-quoted JSON string literal.  Workflow templates MUST use
+    // unquoted placeholders for string fields:
+    //   CORRECT:   "ckpt_name": %model%
+    //   CORRECT:   "text": %positive_prompt%
+    //   WRONG:     "ckpt_name": "%model%"
     function esc(s) {
-        return JSON.stringify(s).slice(1, -1);
+        return JSON.stringify(s);
     }
 
     const replacements = {
