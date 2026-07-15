@@ -21,6 +21,8 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 const EXTENSION_ID = 'ST-BetterImgGen';
 const EXTENSION_NAME = 'Better Image Generation';
 const SETTINGS_KEY = 'ST-BetterImgGen';
+const LOCALSTORAGE_KEY = 'ST-BetterImgGen-settings';
+const SETTINGS_VERSION = 1;
 
 // ── Default Settings ──────────────────────────────────────
 
@@ -132,25 +134,63 @@ jQuery(async () => {
 
 // ── Settings ──────────────────────────────────────────────
 
+function loadFromLocalStorage() {
+    try {
+        const raw = localStorage.getItem(LOCALSTORAGE_KEY);
+        if (raw === null) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+        console.warn('[BetterImgGen] localStorage data was not an object, ignoring');
+        return null;
+    } catch (err) {
+        console.warn('[BetterImgGen] Could not read from localStorage:', err.message);
+        return null;
+    }
+}
+
+function saveToLocalStorage(settings) {
+    try {
+        localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(settings));
+    } catch (err) {
+        console.warn('[BetterImgGen] Could not write to localStorage:', err.message);
+    }
+}
+
+function persistSettings() {
+    saveSettingsDebounced();
+    saveToLocalStorage(getSettings());
+}
+
 async function loadSettings() {
+    // 1. Try to restore from localStorage safety net first
+    const localData = loadFromLocalStorage();
+    if (localData) {
+        extension_settings[SETTINGS_KEY] = localData;
+    }
+
+    // 2. Fallback: if neither localStorage nor ST has settings, use defaults
     if (!extension_settings[SETTINGS_KEY]) {
         extension_settings[SETTINGS_KEY] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
     }
 
-    // Merge defaults for any missing keys
+    // 3. Merge defaults for any missing keys (handles new fields added in updates)
     for (const key of Object.keys(DEFAULT_SETTINGS)) {
         if (extension_settings[SETTINGS_KEY][key] === undefined) {
             extension_settings[SETTINGS_KEY][key] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[key]));
         }
     }
 
-    // Ensure workflowJson is always a string (not a parsed object, null, etc.)
+    // 4. Ensure workflowJson is always a string
     if (typeof extension_settings[SETTINGS_KEY].workflowJson !== 'string') {
         console.warn('[BetterImgGen] loadSettings: workflowJson is not a string (type=' + typeof extension_settings[SETTINGS_KEY].workflowJson + '), resetting to empty string.');
         extension_settings[SETTINGS_KEY].workflowJson = '';
     }
 
-    saveSettingsDebounced();
+    // 5. Stamp version for future migrations
+    extension_settings[SETTINGS_KEY]._version = SETTINGS_VERSION;
+
+    // 6. Persist to both localStorage and ST
+    persistSettings();
 }
 
 function getSettings() {
@@ -158,7 +198,7 @@ function getSettings() {
 }
 
 function saveSettings() {
-    saveSettingsDebounced();
+    persistSettings();
 }
 
 // ── Extension Registration ────────────────────────────────
@@ -503,7 +543,7 @@ async function testConnection(comfyUrl) {
         s.cachedSchedulers = extractSchedulers(info);
         s.cachedLoRAs = extractLoRAs(info);
         s.cacheTimestamp = Date.now();
-        saveSettingsDebounced();
+        persistSettings();
         return { success: true, data: s };
     } catch (err) {
         return { success: false, error: err.message };
@@ -633,7 +673,7 @@ function savePromptTemplate(index, template) {
     } else {
         s.promptTemplates.push(template);
     }
-    saveSettingsDebounced();
+    persistSettings();
 }
 
 function deletePromptTemplate(index) {
@@ -649,7 +689,7 @@ function deletePromptTemplate(index) {
             return false;
         }
         templates.splice(index, 1);
-        saveSettingsDebounced();
+        persistSettings();
         return true;
     }
     return false;
@@ -663,7 +703,7 @@ function getLoraRules() {
 
 function saveLoraRules(rules) {
     getSettings().loraRules = rules;
-    saveSettingsDebounced();
+    persistSettings();
 }
 
 function matchLoraKeywords(prompt, rule) {
@@ -807,12 +847,12 @@ function getCharacterTags() {
 
 function saveCharacterTags(name, tags) {
     getSettings().characterTags[name] = tags;
-    saveSettingsDebounced();
+    persistSettings();
 }
 
 function deleteCharacterTags(name) {
     delete getSettings().characterTags[name];
-    saveSettingsDebounced();
+    persistSettings();
 }
 
 function getCharacterTagGenPrompt() {
@@ -821,7 +861,7 @@ function getCharacterTagGenPrompt() {
 
 function saveCharacterTagGenPrompt(prompt) {
     getSettings().characterTagGenPrompt = prompt;
-    saveSettingsDebounced();
+    persistSettings();
 }
 
 function replaceCharacterPlaceholders(prompt, charTags) {
@@ -844,7 +884,7 @@ function getGenerationModes() {
 
 function saveGenerationModes(modes) {
     getSettings().generationModes = modes;
-    saveSettingsDebounced();
+    persistSettings();
 }
 
 function getChatContext(modeName) {
@@ -1607,7 +1647,7 @@ function openSettingsModal() {
         autoOpen: true,
         close: () => {
             // Save on close
-            saveSettingsDebounced();
+            persistSettings();
         },
     });
 
@@ -1638,7 +1678,7 @@ function openSettingsModal() {
 
     // Wire save button
     document.getElementById('better-img-gen-save-btn').addEventListener('click', () => {
-        saveSettingsDebounced();
+        persistSettings();
         toastr.success('Settings saved.');
     });
 
@@ -1685,7 +1725,7 @@ function openSettingsModal() {
                     const editor = document.getElementById('better-img-gen-workflow-editor');
                     editor.value = ev.target.result;
                     getSettings().workflowJson = ev.target.result;
-                    saveSettingsDebounced();
+                    persistSettings();
                 };
                 reader.readAsText(e.target.files[0]);
             }
@@ -1700,7 +1740,7 @@ function openSettingsModal() {
             const editor = document.getElementById('better-img-gen-workflow-editor');
             editor.value = text;
             getSettings().workflowJson = text;
-            saveSettingsDebounced();
+            persistSettings();
             toastr.success('Workflow pasted from clipboard.');
         } catch (err) {
             toastr.error('Could not read clipboard: ' + err.message);
@@ -1759,7 +1799,7 @@ function openSettingsModal() {
     // Character tag gen prompt: auto-save
     document.getElementById('better-img-gen-char-tag-gen-prompt').addEventListener('input', () => {
         getSettings().characterTagGenPrompt = document.getElementById('better-img-gen-char-tag-gen-prompt').value;
-        saveSettingsDebounced();
+        persistSettings();
     });
 
     // Prompts: expandable cards
@@ -1771,7 +1811,7 @@ function openSettingsModal() {
     document.getElementById('better-img-gen-new-template').addEventListener('click', () => {
         const s = getSettings();
         s.promptTemplates.push({ name: 'New Template', instruction: '' });
-        saveSettingsDebounced();
+        persistSettings();
         // Refresh the prompts panel
         const panel = document.getElementById('better-img-gen-panel-prompts');
         panel.innerHTML = buildPromptsPanel();
@@ -1821,7 +1861,7 @@ function wireLoraPanelEvents() {
         addBtn.addEventListener('click', () => {
             const s = getSettings();
             s.loraRules.push({ keywords: '', model: '', replacement: '' });
-            saveSettingsDebounced();
+            persistSettings();
             const panel = document.getElementById('better-img-gen-panel-lora');
             panel.innerHTML = buildLoraPanel();
             wireLoraPanelEvents();
@@ -1835,7 +1875,7 @@ function wireLoraPanelEvents() {
             const index = parseInt(row.dataset.loraIndex);
             const s = getSettings();
             s.loraRules.splice(index, 1);
-            saveSettingsDebounced();
+            persistSettings();
             const panel = document.getElementById('better-img-gen-panel-lora');
             panel.innerHTML = buildLoraPanel();
             wireLoraPanelEvents();
@@ -1847,21 +1887,21 @@ function wireLoraPanelEvents() {
         el.addEventListener('input', () => {
             const s = getSettings();
             if (s.loraRules[i]) s.loraRules[i].keywords = el.value;
-            saveSettingsDebounced();
+            persistSettings();
         });
     });
     document.querySelectorAll('.better-img-gen-lora-model').forEach((el, i) => {
         el.addEventListener('change', () => {
             const s = getSettings();
             if (s.loraRules[i]) s.loraRules[i].model = el.value;
-            saveSettingsDebounced();
+            persistSettings();
         });
     });
     document.querySelectorAll('.better-img-gen-lora-replacement').forEach((el, i) => {
         el.addEventListener('input', () => {
             const s = getSettings();
             if (s.loraRules[i]) s.loraRules[i].replacement = el.value;
-            saveSettingsDebounced();
+            persistSettings();
         });
     });
 }
@@ -1941,7 +1981,7 @@ function setupAutoSaveInput(id, key, transform) {
         let val = el.value;
         if (transform === Number) val = parseFloat(val) || 0;
         getSettings()[key] = val;
-        saveSettingsDebounced();
+        persistSettings();
     });
 }
 
@@ -1950,7 +1990,7 @@ function setupAutoSaveSelect(id, key) {
     if (!el) return;
     el.addEventListener('change', () => {
         getSettings()[key] = el.value;
-        saveSettingsDebounced();
+        persistSettings();
     });
 }
 
@@ -1959,7 +1999,7 @@ function setupAutoSaveTextarea(id, key) {
     if (!el) return;
     el.addEventListener('input', () => {
         getSettings()[key] = el.value;
-        saveSettingsDebounced();
+        persistSettings();
     });
 }
 
@@ -1968,7 +2008,7 @@ function setupAutoSaveCheckbox(id, key) {
     if (!el) return;
     el.addEventListener('change', () => {
         getSettings()[key] = el.checked;
-        saveSettingsDebounced();
+        persistSettings();
     });
 }
 
@@ -2231,7 +2271,9 @@ function escapeHtml(str) {
 
 function exportSettings() {
     const settings = getSettings();
-    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+    // Strip internal _version field so users don't see bookkeeping in their backup
+    const { _version, ...exportData } = settings;
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -2247,7 +2289,7 @@ function importSettings(file) {
         try {
             const imported = JSON.parse(e.target.result);
             extension_settings[SETTINGS_KEY] = imported;
-            saveSettingsDebounced();
+            persistSettings();
             toastr.success('Settings imported successfully.');
         } catch (err) {
             toastr.error('Invalid settings file: ' + err.message);
