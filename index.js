@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.6+wandfix.2026-09-11';
+const BETTERIMGGEN_BUILD = '1.0.6+promptlog.2026-09-11';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -977,16 +977,86 @@ function buildLlmPrompt(template, chatContext) {
     return template.instruction || '';
 }
 
+/**
+ * Attach one-shot listeners that log the fully assembled prompt SillyTavern
+ * sends to the model.
+ *
+ * What we pass to generateQuietPrompt is only a fragment: Generate() injects it
+ * into a prompt that also carries the system prompt, character card, persona,
+ * example dialogue, chat history, World Info and Author's Note. These two events
+ * fire after that assembly, so they show what the model actually receives.
+ *
+ * @returns {() => void} Detach function. Always call it — a listener left
+ *   attached would dump the user's ordinary chat generations to the console.
+ */
+function attachPromptLogging() {
+    let ctx;
+    try {
+        ctx = getContext();
+    } catch (err) {
+        console.warn('[BetterImgGen] Prompt logging unavailable (no context):', err);
+        return () => {};
+    }
+
+    const events = ctx?.eventSource;
+    const types = ctx?.eventTypes;
+    if (!events || !types) {
+        console.warn('[BetterImgGen] Prompt logging unavailable (no event source on context)');
+        return () => {};
+    }
+
+    // Text completion APIs get a single assembled string.
+    const onTextPrompt = (data) => {
+        if (data?.dryRun) return;
+        const prompt = data?.prompt ?? '';
+        console.groupCollapsed(`[BetterImgGen] FINAL prompt sent to LLM — text completion, ${prompt.length} chars`);
+        console.log(prompt);
+        console.groupEnd();
+    };
+
+    // Chat completion APIs get an array of role/content messages instead.
+    const onChatPrompt = (data) => {
+        if (data?.dryRun) return;
+        const messages = Array.isArray(data?.chat) ? data.chat : [];
+        console.groupCollapsed(`[BetterImgGen] FINAL prompt sent to LLM — chat completion, ${messages.length} messages`);
+        messages.forEach((msg, i) => {
+            console.log(`--- [${i}] ${msg?.role ?? 'unknown'} ---`);
+            console.log(typeof msg?.content === 'string' ? msg.content : msg?.content);
+        });
+        // Snapshot the array too: it is mutated after the event is emitted, so a
+        // live reference would show post-generation state when expanded.
+        try {
+            console.log('Full payload:', structuredClone(messages));
+        } catch {
+            console.log('Full payload (not cloneable):', messages);
+        }
+        console.groupEnd();
+    };
+
+    events.on(types.GENERATE_AFTER_COMBINE_PROMPTS, onTextPrompt);
+    events.on(types.CHAT_COMPLETION_PROMPT_READY, onChatPrompt);
+
+    return () => {
+        events.removeListener(types.GENERATE_AFTER_COMBINE_PROMPTS, onTextPrompt);
+        events.removeListener(types.CHAT_COMPLETION_PROMPT_READY, onChatPrompt);
+    };
+}
+
 async function callLlmForPrompt(llmPrompt) {
     // Use SillyTavern's built-in quiet text generation API
     console.log('[BetterImgGen] callLlmForPrompt called');
-    console.log('[BetterImgGen] Prompt length:', llmPrompt?.length || 0);
-    console.log('[BetterImgGen] Prompt preview (first 300 chars):', llmPrompt?.substring(0, 300));
+
+    console.groupCollapsed(`[BetterImgGen] Quiet prompt injected by this extension — ${llmPrompt?.length || 0} chars`);
+    console.log(llmPrompt);
+    console.groupEnd();
+
+    const detachPromptLogging = attachPromptLogging();
+
     try {
         const result = await generateQuietPrompt({ quietPrompt: llmPrompt });
-        console.log('[BetterImgGen] generateQuietPrompt result type:', typeof result);
-        console.log('[BetterImgGen] Result length:', result?.length || 0);
-        console.log('[BetterImgGen] Result preview (first 300 chars):', result?.substring(0, 300));
+        console.groupCollapsed(`[BetterImgGen] LLM raw response — ${result?.length || 0} chars, type ${typeof result}`);
+        console.log(result);
+        console.groupEnd();
         return result || '';
     } catch (err) {
         console.error('[BetterImgGen] generateQuietPrompt threw error:', err);
@@ -994,6 +1064,8 @@ async function callLlmForPrompt(llmPrompt) {
         console.error('[BetterImgGen] Error message:', err.message);
         console.error('[BetterImgGen] Error stack:', err.stack);
         throw new Error('LLM generation failed: ' + err.message);
+    } finally {
+        detachPromptLogging();
     }
 }
 
