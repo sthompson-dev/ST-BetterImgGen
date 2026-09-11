@@ -110,26 +110,44 @@ const CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 
 let isGenerationRunning = false;
 
+// Wand menu entry bookkeeping
+const WAND_ENTRY_ID = `${EXTENSION_ID}-wand-entry`;
+let wandMenuObserver = null;
+let wandMenuButtonHooked = false;
+
 // ── Initialisation ────────────────────────────────────────
 
+/**
+ * Run one init step in isolation so a failure in it cannot take down the others.
+ * In particular the wand entry must register even if settings loading throws,
+ * otherwise the extension silently disappears from the UI.
+ */
+function initStep(label, fn) {
+    try {
+        return fn();
+    } catch (err) {
+        console.error(`[BetterImgGen] Init step failed: ${label}`, err);
+        toastr?.error?.(`Better Image Generation: ${label} failed. Check console for details.`);
+        return undefined;
+    }
+}
+
 jQuery(async () => {
+    // The wand entry goes in first and on its own: it is the only way back into
+    // the extension, so it must not depend on any other step succeeding.
+    initStep('wand menu registration', registerExtension);
+
     try {
         await loadSettings();
-
-        // Register the wand button in the extensions bar
-        registerExtension();
-
-        // Register slash commands
-        registerSlashCommands();
-
-        // Register event listeners
-        registerEventListeners();
-
-        console.log('[BetterImgGen] Extension initialized successfully');
     } catch (err) {
-        console.error('[BetterImgGen] Extension initialization failed:', err);
-        toastr?.error?.('Better Image Generation: initialization failed. Check console for details.');
+        console.error('[BetterImgGen] Settings load failed, continuing with defaults:', err);
+        toastr?.error?.('Better Image Generation: settings failed to load. Check console for details.');
     }
+
+    initStep('slash command registration', registerSlashCommands);
+    initStep('event listener registration', registerEventListeners);
+
+    console.log('[BetterImgGen] Extension initialized');
 });
 
 // ── Settings ──────────────────────────────────────────────
@@ -208,8 +226,75 @@ function registerExtension() {
     addToWandMenu();
 }
 
-function addToWandMenu(retries = 20) {
-    // Step 1: wait for #extensionsMenu
+/**
+ * Insert our entry into the wand menu if it is not already there.
+ *
+ * Never reuse or rebind an entry we did not create: every item in
+ * #extensionsMenu carries the .list-group-item class, so a bare
+ * '#extensionsMenu .list-group-item' lookup matches whichever extension
+ * rendered first (Data Bank, Attach a File, ...) rather than anything of ours.
+ *
+ * @param {HTMLElement} wandMenu - The live #extensionsMenu element
+ * @returns {boolean} true if an entry was inserted by this call
+ */
+function insertWandEntry(wandMenu) {
+    if (!wandMenu || document.getElementById(WAND_ENTRY_ID)) return false;
+
+    const html = `
+        <div id="${WAND_ENTRY_ID}" class="list-group-item flex-container flexGap5 interactable" title="Better Image Generation">
+            <div class="fa-fw fa-solid fa-wand-magic-sparkles extensionsMenuExtensionButton"></div>
+            <span>Better Image Generation</span>
+        </div>
+    `;
+    wandMenu.insertAdjacentHTML('beforeend', html);
+
+    const el = document.getElementById(WAND_ENTRY_ID);
+    if (!el) {
+        console.warn('[BetterImgGen] Wand entry did not survive insertion');
+        return false;
+    }
+
+    el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showWandMenuDialog();
+    });
+
+    console.log('[BetterImgGen] Added wand entry: Better Image Generation');
+    return true;
+}
+
+/**
+ * Re-add the entry whenever SillyTavern rebuilds the wand menu underneath us.
+ * ST strips injected nodes on some re-renders, which previously left the
+ * extension with no visible entry until a full page reload.
+ */
+function watchWandMenu(wandMenu) {
+    if (wandMenuObserver) wandMenuObserver.disconnect();
+
+    wandMenuObserver = new MutationObserver(() => {
+        // Guarded by the id check in insertWandEntry, so re-inserting here does
+        // not re-trigger this observer into a loop.
+        insertWandEntry(document.getElementById('extensionsMenu'));
+    });
+    wandMenuObserver.observe(wandMenu, { childList: true });
+    wandMenuObserver._target = wandMenu;
+
+    // The menu node itself can be replaced, which would orphan the observer
+    // above. Re-check (and re-attach) each time the user opens the menu.
+    if (!wandMenuButtonHooked) {
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest?.('#extensionsMenuButton')) return;
+            const live = document.getElementById('extensionsMenu');
+            if (!live) return;
+            if (live !== wandMenuObserver?._target) watchWandMenu(live);
+            insertWandEntry(live);
+        }, true);
+        wandMenuButtonHooked = true;
+    }
+}
+
+function addToWandMenu(retries = 40) {
     const wandMenu = document.getElementById('extensionsMenu');
     if (!wandMenu) {
         if (retries > 0) {
@@ -220,39 +305,8 @@ function addToWandMenu(retries = 20) {
         return;
     }
 
-    // Step 2: try to find an existing wand entry that ST may have created for us
-    const existingEntry = document.querySelector('#extensionsMenu .list-group-item');
-    if (existingEntry) {
-        // ST already built an entry — just override its click handler
-        existingEntry.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            showWandMenuDialog();
-        };
-        console.log('[BetterImgGen] Hooked into existing wand entry');
-        return;
-    }
-
-    // Step 3: no existing entry found — create our own list-group-item
-    if (document.getElementById(`${EXTENSION_ID}-wand-entry`)) return;
-
-    const html = `
-        <div id="${EXTENSION_ID}-wand-entry" class="list-group-item" title="Better Image Generation">
-                    <span>🎨 Better Image Generation</span>
-                </div>
-            `;
-    wandMenu.insertAdjacentHTML('beforeend', html);
-
-    const el = document.getElementById(`${EXTENSION_ID}-wand-entry`);
-    if (el) {
-        el.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            showWandMenuDialog();
-        });
-    }
-
-    console.log('[BetterImgGen] Added wand entry: Better Image Generation');
+    insertWandEntry(wandMenu);
+    watchWandMenu(wandMenu);
 
     // Log available SillyTavern context info
     try {
