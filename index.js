@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.6+promptlog.2026-09-11';
+const BETTERIMGGEN_BUILD = '1.0.7+cardsearch.2026-09-11';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -99,7 +99,7 @@ const DEFAULT_SETTINGS = {
     loraRules: [],
 
     // Character Tags
-    characterTagGenPrompt: 'Given the following character card and recent chat messages, generate Stable Diffusion tags that describe this character visually. Include appearance, clothing, expression, and any notable features. Return only the comma-separated tags, no explanation.',
+    characterTagGenPrompt: 'The source material below may describe several characters. Generate Stable Diffusion tags describing the visual appearance of the target character only: physical features, hair, eyes, build, clothing, and expression. Ignore every other character. Return only the comma-separated tags, no explanation.',
     characterTags: {},
 
     // Cached ComfyUI data
@@ -938,13 +938,16 @@ function saveCharacterTagGenPrompt(prompt) {
 
 function replaceCharacterPlaceholders(prompt, charTags) {
     if (!prompt || !charTags) return prompt;
+    // Matched case-insensitively. Tags are stored under whatever spelling the
+    // source material used, but placeholders are typed by hand, so an exact
+    // match meant [[celeste]] silently failed against a stored "Celeste" and
+    // the placeholder was left in the prompt verbatim.
+    const byLowerName = new Map(
+        Object.keys(charTags).map(key => [key.toLowerCase(), charTags[key]]),
+    );
     return prompt.replace(/\[\[([^\]]+)\]\]/g, (match, name) => {
-        const trimmed = name.trim();
-        if (charTags[trimmed]) {
-            return charTags[trimmed];
-        }
         // Leave unmatched placeholders as-is
-        return match;
+        return byLowerName.get(name.trim().toLowerCase()) || match;
     });
 }
 
@@ -957,6 +960,144 @@ function getGenerationModes() {
 function saveGenerationModes(modes) {
     getSettings().generationModes = modes;
     persistSettings();
+}
+
+/**
+ * Escape a string for literal use inside a RegExp.
+ */
+function escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Narrative fields of a character card, labelled and concatenated.
+ *
+ * A card is not a character. Cards routinely describe a whole cast, and a
+ * card's name is frequently the setting, the narrator or the scenario rather
+ * than any person in it — so the name is not a reliable way to find the
+ * character we want. Every field is included because appearance details are as
+ * likely to sit in the scenario or the opening message as in the description.
+ *
+ * @param {object} char A SillyTavern character card.
+ * @returns {string} Labelled text, or '' if the card carries nothing usable.
+ */
+function getCardText(char) {
+    if (!char) return '';
+    const d = char.data || {};
+    const fields = [
+        ['Name', char.name || d.name],
+        ['Description', char.description || d.description],
+        ['Personality', char.personality || d.personality],
+        ['Scenario', char.scenario || d.scenario],
+        ['First message', char.first_mes || d.first_mes],
+        ['Example dialogue', char.mes_example || d.mes_example],
+    ];
+    return fields
+        .filter(([, value]) => typeof value === 'string' && value.trim())
+        .map(([label, value]) => label + ': ' + value.trim())
+        .join('\n\n');
+}
+
+/**
+ * Entries from a card's embedded lorebook that mention `name`.
+ *
+ * Side characters are usually defined here rather than in the description, so
+ * for any name that is not the card's own this is the likeliest place they are
+ * actually described. Entries are filtered by mention to keep the prompt
+ * bounded: a character book can be many times larger than the card itself.
+ *
+ * @returns {string[]} Matching entry bodies.
+ */
+function getCardBookEntriesMentioning(char, name) {
+    const book = char?.data?.character_book;
+    const entries = Array.isArray(book?.entries) ? book.entries : [];
+    if (!entries.length || !name) return [];
+    const needle = name.toLowerCase();
+    return entries
+        .filter(entry => {
+            const keys = Array.isArray(entry?.keys) ? entry.keys.join(' ') : '';
+            const haystack = (keys + ' ' + (entry?.comment || '') + ' ' + (entry?.content || '')).toLowerCase();
+            return haystack.includes(needle);
+        })
+        .map(entry => (entry?.content || '').trim())
+        .filter(Boolean);
+}
+
+/**
+ * The character cards in play for the current chat.
+ *
+ * Deliberately not context.characters, which is the user's entire library and
+ * can run to hundreds of cards. In a group chat every member counts, since the
+ * character being described may belong to any of them.
+ *
+ * @returns {object[]} Active cards, possibly empty.
+ */
+function getActiveCards(context) {
+    if (!context) return [];
+    const characters = Array.isArray(context.characters) ? context.characters : [];
+
+    if (context.groupId) {
+        const group = (context.groups || []).find(g => String(g.id) === String(context.groupId));
+        const members = Array.isArray(group?.members) ? group.members : [];
+        // Members are stored as avatar filenames, not names or indices.
+        return members
+            .map(avatar => characters.find(c => c.avatar === avatar))
+            .filter(Boolean);
+    }
+
+    const active = characters[context.characterId];
+    return active ? [active] : [];
+}
+
+/**
+ * Gather every source that might describe `charName`, for the tag generator.
+ *
+ * Searches the *content* of the cards in play rather than matching their names.
+ * A card called "Riverside Inn" can still be the only place Celeste is
+ * described, and the character the user wants may have no card of their own at
+ * all — they may exist only in the card's lorebook or in the chat.
+ *
+ * @returns {{material: string, mentioned: boolean, canonicalName: string}}
+ *   `material` is the prompt-ready text. `mentioned` is false when the name
+ *   appears nowhere in it, which is the caller's cue to stop rather than ask
+ *   the model to invent someone. `canonicalName` is the spelling as it appears
+ *   in the source, so stored tags match how the character is actually written.
+ */
+function collectCharacterSources(charName, context) {
+    const blocks = [];
+    const cards = getActiveCards(context);
+
+    // A card named after the character is the best source when one happens to
+    // exist, so add it — but as a bonus on top of the content search, never as
+    // a substitute for it.
+    const characters = Array.isArray(context?.characters) ? context.characters : [];
+    const namesake = characters.find(c => c?.name?.toLowerCase() === charName.toLowerCase());
+    if (namesake && !cards.includes(namesake)) cards.push(namesake);
+
+    for (const card of cards) {
+        const text = getCardText(card);
+        if (text) blocks.push('--- Character card: "' + card.name + '" ---\n' + text);
+
+        const bookEntries = getCardBookEntriesMentioning(card, charName);
+        if (bookEntries.length) {
+            blocks.push(
+                '--- Lorebook entries from "' + card.name + '" mentioning ' + charName + ' ---\n'
+                + bookEntries.join('\n\n'),
+            );
+        }
+    }
+
+    const chat = getChatContext('');
+    if (chat) blocks.push('--- Recent chat ---\n' + chat);
+
+    const material = blocks.join('\n\n');
+    const match = material.match(new RegExp(escapeRegExp(charName), 'i'));
+
+    return {
+        material,
+        mentioned: !!match,
+        canonicalName: match ? match[0] : charName,
+    };
 }
 
 function getChatContext(modeName) {
@@ -1009,28 +1150,43 @@ function attachPromptLogging() {
     const onTextPrompt = (data) => {
         if (data?.dryRun) return;
         const prompt = data?.prompt ?? '';
-        console.groupCollapsed(`[BetterImgGen] FINAL prompt sent to LLM — text completion, ${prompt.length} chars`);
-        console.log(prompt);
-        console.groupEnd();
+        // Generate() emits this event from more than one path; an empty payload
+        // is not the prompt we are after and only adds noise.
+        if (!prompt) return;
+        console.log(
+            `[BetterImgGen] ===== FINAL PROMPT (text completion, ${prompt.length} chars) =====
+`
+            + prompt
+            + '
+[BetterImgGen] ===== END FINAL PROMPT =====',
+        );
     };
 
     // Chat completion APIs get an array of role/content messages instead.
     const onChatPrompt = (data) => {
         if (data?.dryRun) return;
         const messages = Array.isArray(data?.chat) ? data.chat : [];
-        console.groupCollapsed(`[BetterImgGen] FINAL prompt sent to LLM — chat completion, ${messages.length} messages`);
-        messages.forEach((msg, i) => {
-            console.log(`--- [${i}] ${msg?.role ?? 'unknown'} ---`);
-            console.log(typeof msg?.content === 'string' ? msg.content : msg?.content);
-        });
-        // Snapshot the array too: it is mutated after the event is emitted, so a
-        // live reference would show post-generation state when expanded.
-        try {
-            console.log('Full payload:', structuredClone(messages));
-        } catch {
-            console.log('Full payload (not cloneable):', messages);
-        }
-        console.groupEnd();
+
+        // Rendered as one flat string rather than console groups or an object:
+        // collapsed groups and expandable objects cannot be selected and copied
+        // out of the browser console, which is the whole point of this log.
+        const rendered = messages.map((msg, i) => {
+            const role = msg?.role ?? 'unknown';
+            const content = typeof msg?.content === 'string'
+                ? msg.content
+                : JSON.stringify(msg?.content);
+            return `--- [${i}] ${role} ---
+${content}`;
+        }).join('
+');
+
+        console.log(
+            `[BetterImgGen] ===== FINAL PROMPT (chat completion, ${messages.length} messages) =====
+`
+            + rendered
+            + '
+[BetterImgGen] ===== END FINAL PROMPT =====',
+        );
     };
 
     events.on(types.GENERATE_AFTER_COMBINE_PROMPTS, onTextPrompt);
@@ -1046,17 +1202,32 @@ async function callLlmForPrompt(llmPrompt) {
     // Use SillyTavern's built-in quiet text generation API
     console.log('[BetterImgGen] callLlmForPrompt called');
 
-    console.groupCollapsed(`[BetterImgGen] Quiet prompt injected by this extension — ${llmPrompt?.length || 0} chars`);
-    console.log(llmPrompt);
-    console.groupEnd();
+    console.log(
+        `[BetterImgGen] ===== INJECTED FRAGMENT (${llmPrompt?.length || 0} chars) =====
+`
+        + llmPrompt
+        + '
+[BetterImgGen] ===== END INJECTED FRAGMENT =====',
+    );
 
     const detachPromptLogging = attachPromptLogging();
 
     try {
         const result = await generateQuietPrompt({ quietPrompt: llmPrompt });
-        console.groupCollapsed(`[BetterImgGen] LLM raw response — ${result?.length || 0} chars, type ${typeof result}`);
-        console.log(result);
-        console.groupEnd();
+        console.log(
+            `[BetterImgGen] ===== LLM RESPONSE (${result?.length || 0} chars, type ${typeof result}) =====
+`
+            + result
+            + '
+[BetterImgGen] ===== END LLM RESPONSE =====',
+        );
+        if (typeof result === 'string' && !result.trim()) {
+            console.warn(
+                '[BetterImgGen] The model returned an empty string. generateQuietPrompt strips '
+                + 'reasoning blocks from the reply, so a response that was entirely reasoning '
+                + 'arrives here as empty. Check the raw reply in the network tab.',
+            );
+        }
         return result || '';
     } catch (err) {
         console.error('[BetterImgGen] generateQuietPrompt threw error:', err);
@@ -1445,33 +1616,36 @@ function openTagGenerationDialog(presetName = '') {
 
         try {
             const context = getContext();
-            let charCard = '';
-            let chatMessages = '';
 
             console.log('[BetterImgGen] Tag generation for char:', charName);
             console.log('[BetterImgGen] Context available:', !!context);
-            console.log('[BetterImgGen] Characters array length:', context?.characters?.length ?? 0);
 
-            if (context && context.characters) {
-                const char = context.characters.find(c =>
-                    c.name.toLowerCase() === charName.toLowerCase()
+            const sources = collectCharacterSources(charName, context);
+            console.log('[BetterImgGen] Source material length:', sources.material.length);
+            console.log('[BetterImgGen] Name mentioned in sources:', sources.mentioned);
+
+            if (!sources.mentioned) {
+                // Generating anyway would hand the model a name and no subject,
+                // which produces either an invented character or nothing at all.
+                console.warn('[BetterImgGen] No mention of', charName, 'in the active cards, their lorebooks, or recent chat.');
+                toastr.warning(
+                    'Nothing in the current chat or its character cards mentions "' + charName + '". '
+                    + 'Nothing was saved \u2014 check the spelling, or open the chat where they appear.',
                 );
-                if (char) {
-                    charCard = char.description || char.data?.description || '';
-                    // Store under the card's own spelling so [[Name]] placeholders,
-                    // which match exactly, resolve regardless of what was typed.
-                    charName = char.name;
-                    console.log('[BetterImgGen] Char found, card length:', charCard.length);
-                } else {
-                    console.warn('[BetterImgGen] Character not found in context:', charName);
-                }
+                return;
             }
 
-            chatMessages = getChatContext('');
-            console.log('[BetterImgGen] Chat messages length:', chatMessages.length);
+            // Store under the spelling the source material uses, so the tags a
+            // [[Placeholder]] resolves to line up with how the character is
+            // actually written in the story.
+            charName = sources.canonicalName;
 
             const genPrompt = getCharacterTagGenPrompt();
-            const fullPrompt = genPrompt + '\n\nCharacter: ' + charName + '\nDescription: ' + charCard + '\n\nChat:\n' + chatMessages;
+            const fullPrompt = genPrompt
+                + '\n\nTarget character: ' + charName + '\n'
+                + 'The source material below may describe several characters. Describe only '
+                + charName + ', and ignore everyone else.\n\n'
+                + sources.material;
             console.log('[BetterImgGen] Full prompt length:', fullPrompt.length);
             console.log('[BetterImgGen] Calling callLlmForPrompt...');
             const tags = await callLlmForPrompt(fullPrompt);
