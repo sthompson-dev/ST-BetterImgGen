@@ -220,7 +220,14 @@ async function loadSettings() {
 }
 
 function getSettings() {
-    return extension_settings[SETTINGS_KEY] || DEFAULT_SETTINGS;
+    // Never return DEFAULT_SETTINGS itself: callers write through this object,
+    // and mutating the defaults in place corrupts every later load (loadSettings
+    // deep-clones DEFAULT_SETTINGS to seed missing keys). If settings are not
+    // loaded yet, seed a real store from a clone so writes land somewhere durable.
+    if (!extension_settings[SETTINGS_KEY]) {
+        extension_settings[SETTINGS_KEY] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    }
+    return extension_settings[SETTINGS_KEY];
 }
 
 function saveSettings() {
@@ -908,12 +915,15 @@ function getCharacterTags() {
 }
 
 function saveCharacterTags(name, tags) {
-    getSettings().characterTags[name] = tags;
+    const s = getSettings();
+    if (!s.characterTags) s.characterTags = {};
+    s.characterTags[name] = tags;
     persistSettings();
 }
 
 function deleteCharacterTags(name) {
-    delete getSettings().characterTags[name];
+    const s = getSettings();
+    if (s.characterTags) delete s.characterTags[name];
     persistSettings();
 }
 
@@ -1324,14 +1334,22 @@ async function showPromptEditor(prompt) {
 // ── Wand Menu (Epic 8) ──────────────────────────────────
 // Extension buttons are registered directly in addToWandMenu() above.
 
-function openTagGenerationDialog() {
+/**
+ * Dialog for generating a character's SD tags via the LLM.
+ *
+ * @param {string} presetName Character name to pre-fill. The characters panel
+ *   passes the card's name so the user does not have to retype it; retyping was
+ *   how tags ended up stored under a differently-cased key than the one
+ *   [[Placeholder]] lookups use.
+ */
+function openTagGenerationDialog(presetName = '') {
     const dialogHtml = `
         <div id="better-img-gen-tag-dialog" title="Generate Character Tags">
             <div style="padding:12px;">
                 <div class="better-img-gen-field" style="margin-bottom:12px;">
                     <label>Character Name</label>
                     <input type="text" class="better-img-gen-input" id="better-img-gen-tag-char-name"
-                           placeholder="Enter character name">
+                           placeholder="Enter character name" value="${escapeHtml(presetName || '')}">
                 </div>
                 <button class="better-img-gen-btn better-img-gen-btn-primary" id="better-img-gen-tag-generate-btn"
                         style="width:100%;">Generate Tags</button>
@@ -1347,7 +1365,7 @@ function openTagGenerationDialog() {
     });
 
     document.getElementById('better-img-gen-tag-generate-btn').addEventListener('click', async () => {
-        const charName = document.getElementById('better-img-gen-tag-char-name').value.trim();
+        let charName = document.getElementById('better-img-gen-tag-char-name').value.trim();
         if (!charName) {
             toastr.warning('Please enter a character name.');
             return;
@@ -1368,6 +1386,9 @@ function openTagGenerationDialog() {
                 );
                 if (char) {
                     charCard = char.description || char.data?.description || '';
+                    // Store under the card's own spelling so [[Name]] placeholders,
+                    // which match exactly, resolve regardless of what was typed.
+                    charName = char.name;
                     console.log('[BetterImgGen] Char found, card length:', charCard.length);
                 } else {
                     console.warn('[BetterImgGen] Character not found in context:', charName);
@@ -1384,7 +1405,18 @@ function openTagGenerationDialog() {
             const tags = await callLlmForPrompt(fullPrompt);
             console.log('[BetterImgGen] callLlmForPrompt returned tags length:', tags?.length ?? 0);
 
-            saveCharacterTags(charName, tags.trim());
+            const trimmedTags = (tags || '').trim();
+            if (!trimmedTags) {
+                // The LLM returned nothing usable. Saving here would create an
+                // empty entry and still report success, which reads as "it
+                // worked but there is no entry".
+                console.warn('[BetterImgGen] LLM returned no tags for', charName);
+                toastr.warning(`No tags returned for ${charName}. Nothing was saved — try again or check the LLM connection.`);
+                return;
+            }
+
+            saveCharacterTags(charName, trimmedTags);
+            refreshCharactersPanel();
             toastr.success(`Tags generated for ${charName}`);
             dlg.dialog('close');
         } catch (err) {
@@ -1968,6 +2000,18 @@ function wireLoraPanelEvents() {
     });
 }
 
+/**
+ * Re-render the characters panel from current settings, if it is on screen.
+ * The panel is built from Object.keys(characterTags), so any write to that map
+ * leaves the rendered list stale until this runs.
+ */
+function refreshCharactersPanel() {
+    const panel = document.getElementById('better-img-gen-panel-characters');
+    if (!panel) return;
+    panel.innerHTML = buildCharactersPanel();
+    wireCharacterPanelEvents();
+}
+
 function wireCharacterPanelEvents() {
     // Character: Save Tags
     document.querySelectorAll('.better-img-gen-char-tags-save').forEach(btn => {
@@ -1976,6 +2020,15 @@ function wireCharacterPanelEvents() {
             const name = card.dataset.charName;
             const tags = card.querySelector('.better-img-gen-char-tags').value;
             saveCharacterTags(name, tags);
+            // Update the badge in place rather than re-rendering: a full refresh
+            // would collapse the card the user is currently editing.
+            const badge = card.querySelector('.better-img-gen-badge');
+            if (badge) {
+                const hasTags = !!tags.trim();
+                badge.classList.toggle('has-tags', hasTags);
+                badge.classList.toggle('no-tags', !hasTags);
+                badge.textContent = hasTags ? 'Tags Set' : 'No Tags';
+            }
             toastr.success('Tags saved for ' + name);
         });
     });
@@ -1999,9 +2052,7 @@ function wireCharacterPanelEvents() {
             const name = card.dataset.charName;
             if (confirm('Clear tags for ' + name + '?')) {
                 deleteCharacterTags(name);
-                const panel = document.getElementById('better-img-gen-panel-characters');
-                panel.innerHTML = buildCharactersPanel();
-                wireCharacterPanelEvents();
+                refreshCharactersPanel();
                 toastr.success('Tags cleared for ' + name);
             }
         });
