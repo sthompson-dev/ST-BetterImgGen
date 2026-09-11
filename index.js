@@ -16,6 +16,14 @@ if (typeof generateQuietPrompt !== 'function') {
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 
+// ── Build stamp ───────────────────────────────────────────
+// Logged at module scope, before any other work, so the browser console shows
+// which build is actually being served. If this line is missing or the version
+// is stale, the deployed file (or a cached copy of it) is not the current one.
+const BETTERIMGGEN_BUILD = '1.0.6+wandfix.2026-09-11';
+console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
+window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
+
 // ── Constants ─────────────────────────────────────────────
 
 const EXTENSION_ID = 'ST-BetterImgGen';
