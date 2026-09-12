@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.11+reasoning3000.2026-09-12';
+const BETTERIMGGEN_BUILD = '1.0.12+budget6000.2026-09-12';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -1204,12 +1204,17 @@ function attachPromptLogging() {
 // money, and produced nothing. We deliberately leave the preset's reasoning
 // settings alone — thinking usually improves the tag list — so the budget has
 // to cover a think and an answer, not just an answer.
-const LLM_MAX_TOKENS = 3000;
+//
+// 3000 was still not enough: the same model spent ~2500 tokens thinking and
+// had its tag list cut off mid-line. Thinking scales with how much source
+// material the character has, so the budget has to leave room for a long think
+// and a complete answer after it.
+const LLM_MAX_TOKENS = 6000;
 
 // Budget for the single retry issued when a model reasons past LLM_MAX_TOKENS
 // anyway. Anything that still cannot answer in this much has misread the task,
 // and retrying further would only burn tokens.
-const LLM_MAX_TOKENS_RETRY = 6000;
+const LLM_MAX_TOKENS_RETRY = 12000;
 
 // Deliberately blunt. These requests are issued from inside a roleplay session,
 // and without an explicit frame models tend to answer in character or open with
