@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.10+noreasoning.2026-09-12';
+const BETTERIMGGEN_BUILD = '1.0.11+reasoning3000.2026-09-12';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -1201,8 +1201,10 @@ function attachPromptLogging() {
 // It is nonetheless generous, because a reasoning model bills its thinking
 // against the same allowance. At 600 tokens DeepSeek v4.1 spent the entire
 // budget reasoning and returned an empty message: the request succeeded, cost
-// money, and produced nothing.
-const LLM_MAX_TOKENS = 2000;
+// money, and produced nothing. We deliberately leave the preset's reasoning
+// settings alone — thinking usually improves the tag list — so the budget has
+// to cover a think and an answer, not just an answer.
+const LLM_MAX_TOKENS = 3000;
 
 // Budget for the single retry issued when a model reasons past LLM_MAX_TOKENS
 // anyway. Anything that still cannot answer in this much has misread the task,
@@ -1263,26 +1265,17 @@ async function requestChatCompletion(context, llmPrompt, maxTokens) {
         model: context.getChatCompletionModel ? context.getChatCompletionModel() : undefined,
         chat_completion_source: settings.chat_completion_source,
         max_tokens: maxTokens,
-        // Thinking is billed against max_tokens and buys nothing for a tag
-        // list, so ask for it to be left out. The user's preset may well
-        // request heavy reasoning for roleplay; that is the right setting
-        // there and the wrong one here.
-        include_reasoning: false,
+        // No include_reasoning or reasoning_effort here on purpose: whatever
+        // the user's preset asks for is what we send. Thinking costs tokens
+        // but produces better tags, so the fix for running out of room is a
+        // larger max_tokens, not a quieter model.
     };
-
-    // 'none' is the value SillyTavern itself sends to OpenRouter for minimum
-    // effort with thoughts hidden. Only set on sources known to take it: an
-    // effort value a backend never asked for can be rejected outright.
-    if (settings.chat_completion_source === 'openrouter') {
-        payload.reasoning_effort = 'none';
-    }
 
     console.log(
         '[BetterImgGen] Direct chat completion \u2014',
         payload.chat_completion_source, '/', payload.model,
         '| preset:', presetName || '(none)',
         '| max_tokens:', maxTokens,
-        '| reasoning:', payload.reasoning_effort || 'preset default, not returned',
     );
 
     return unwrapCompletionResult(
@@ -1386,10 +1379,9 @@ async function callLlmForPrompt(llmPrompt) {
     let data = await request(LLM_MAX_TOKENS);
 
     // Reasoning and no answer means the model was cut off mid-thought: the
-    // reply it was working towards was never emitted. include_reasoning and
-    // reasoning_effort are requests, not guarantees, and plenty of models
-    // think anyway — so buy more room once rather than report a failure
-    // the user can do nothing about.
+    // reply it was working towards was never emitted. How long a model thinks
+    // is its own business and cannot be predicted from the prompt, so buy more
+    // room once rather than report a failure the user can do nothing about.
     if (!data.content.trim() && data.reasoning) {
         console.warn(
             `[BetterImgGen] Got ${data.reasoning.length} chars of reasoning and no answer \u2014 the `
@@ -1418,8 +1410,8 @@ async function callLlmForPrompt(llmPrompt) {
             '[BetterImgGen] The model returned nothing usable'
             + (data.reasoning
                 ? `, only reasoning, even at ${LLM_MAX_TOKENS_RETRY} tokens. This model thinks past any `
-                    + 'budget it is given for this instruction \u2014 pick a non-reasoning model, or shorten the '
-                    + 'source material it has to read.'
+                    + 'budget it is given for this instruction \u2014 lower the reasoning effort in your preset, '
+                    + 'or shorten the source material it has to read.'
                 : '. The request reached the backend and came back empty \u2014 check the network tab for the raw reply.'),
         );
     }
