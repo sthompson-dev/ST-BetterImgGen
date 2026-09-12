@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.9+directllm.2026-09-12';
+const BETTERIMGGEN_BUILD = '1.0.10+noreasoning.2026-09-12';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -1194,10 +1194,20 @@ function attachPromptLogging() {
     };
 }
 
-// Our requests are short by construction: a tag list or a single image prompt.
-// Capping the reply keeps a model that ignores the instruction and starts
+// Our requests are short by construction: a tag list or a single image prompt,
+// so the cap mainly stops a model that ignores the instruction and starts
 // narrating from running to the full roleplay response length.
-const LLM_MAX_TOKENS = 600;
+//
+// It is nonetheless generous, because a reasoning model bills its thinking
+// against the same allowance. At 600 tokens DeepSeek v4.1 spent the entire
+// budget reasoning and returned an empty message: the request succeeded, cost
+// money, and produced nothing.
+const LLM_MAX_TOKENS = 2000;
+
+// Budget for the single retry issued when a model reasons past LLM_MAX_TOKENS
+// anyway. Anything that still cannot answer in this much has misread the task,
+// and retrying further would only burn tokens.
+const LLM_MAX_TOKENS_RETRY = 6000;
 
 // Deliberately blunt. These requests are issued from inside a roleplay session,
 // and without an explicit frame models tend to answer in character or open with
@@ -1244,7 +1254,7 @@ function unwrapCompletionResult(result) {
  * out-of-band request. If the preset cannot be resolved the service warns and
  * proceeds, which is why source and model are passed explicitly.
  */
-async function requestChatCompletion(context, llmPrompt) {
+async function requestChatCompletion(context, llmPrompt, maxTokens) {
     const settings = context.chatCompletionSettings || {};
     const presetName = context.getPresetManager?.('openai')?.getSelectedPresetName?.();
     const payload = {
@@ -1252,14 +1262,27 @@ async function requestChatCompletion(context, llmPrompt) {
         messages: buildLlmMessages(llmPrompt),
         model: context.getChatCompletionModel ? context.getChatCompletionModel() : undefined,
         chat_completion_source: settings.chat_completion_source,
-        max_tokens: LLM_MAX_TOKENS,
+        max_tokens: maxTokens,
+        // Thinking is billed against max_tokens and buys nothing for a tag
+        // list, so ask for it to be left out. The user's preset may well
+        // request heavy reasoning for roleplay; that is the right setting
+        // there and the wrong one here.
+        include_reasoning: false,
     };
+
+    // 'none' is the value SillyTavern itself sends to OpenRouter for minimum
+    // effort with thoughts hidden. Only set on sources known to take it: an
+    // effort value a backend never asked for can be rejected outright.
+    if (settings.chat_completion_source === 'openrouter') {
+        payload.reasoning_effort = 'none';
+    }
 
     console.log(
         '[BetterImgGen] Direct chat completion \u2014',
         payload.chat_completion_source, '/', payload.model,
         '| preset:', presetName || '(none)',
-        '| max_tokens:', LLM_MAX_TOKENS,
+        '| max_tokens:', maxTokens,
+        '| reasoning:', payload.reasoning_effort || 'preset default, not returned',
     );
 
     return unwrapCompletionResult(
@@ -1271,14 +1294,14 @@ async function requestChatCompletion(context, llmPrompt) {
  * One-off text completion using the user's current backend, preset and
  * instruct template.
  */
-async function requestTextCompletion(context, llmPrompt) {
+async function requestTextCompletion(context, llmPrompt, maxTokens) {
     const settings = context.textCompletionSettings || {};
     const presetName = context.getPresetManager?.('textgenerationwebui')?.getSelectedPresetName?.();
     const instructName = context.getPresetManager?.('instruct')?.getSelectedPresetName?.();
     const payload = {
         stream: false,
         prompt: buildLlmMessages(llmPrompt),
-        max_tokens: LLM_MAX_TOKENS,
+        max_tokens: maxTokens,
         api_type: settings.type,
     };
 
@@ -1287,7 +1310,7 @@ async function requestTextCompletion(context, llmPrompt) {
         payload.api_type,
         '| preset:', presetName || '(none)',
         '| instruct:', instructName || '(none)',
-        '| max_tokens:', LLM_MAX_TOKENS,
+        '| max_tokens:', maxTokens,
     );
 
     return unwrapCompletionResult(
@@ -1326,14 +1349,15 @@ async function callLlmForPrompt(llmPrompt) {
 
     const context = getContext();
     const api = context?.mainApi;
-    let data;
 
-    try {
-        if (api === 'openai' && context.ChatCompletionService) {
-            data = await requestChatCompletion(context, llmPrompt);
-        } else if (api === 'textgenerationwebui' && context.TextCompletionService) {
-            data = await requestTextCompletion(context, llmPrompt);
-        } else {
+    const request = async (maxTokens) => {
+        try {
+            if (api === 'openai' && context.ChatCompletionService) {
+                return await requestChatCompletion(context, llmPrompt, maxTokens);
+            }
+            if (api === 'textgenerationwebui' && context.TextCompletionService) {
+                return await requestTextCompletion(context, llmPrompt, maxTokens);
+            }
             // Older SillyTavern, or a backend with no direct-request service
             // (KoboldAI, NovelAI, Horde). The pipeline call still works, with
             // all the caveats above, so warn rather than fail.
@@ -1344,19 +1368,35 @@ async function callLlmForPrompt(llmPrompt) {
             );
             const detachPromptLogging = attachPromptLogging();
             try {
-                data = unwrapCompletionResult({
+                return unwrapCompletionResult({
                     content: await generateQuietPrompt({ quietPrompt: llmPrompt }),
                 });
             } finally {
                 detachPromptLogging();
             }
+        } catch (err) {
+            console.error('[BetterImgGen] LLM request failed:', err);
+            console.error('[BetterImgGen] Error name:', err?.name);
+            console.error('[BetterImgGen] Error message:', err?.message);
+            console.error('[BetterImgGen] Error stack:', err?.stack);
+            throw new Error('LLM generation failed: ' + (err?.message || err));
         }
-    } catch (err) {
-        console.error('[BetterImgGen] LLM request failed:', err);
-        console.error('[BetterImgGen] Error name:', err?.name);
-        console.error('[BetterImgGen] Error message:', err?.message);
-        console.error('[BetterImgGen] Error stack:', err?.stack);
-        throw new Error('LLM generation failed: ' + (err?.message || err));
+    };
+
+    let data = await request(LLM_MAX_TOKENS);
+
+    // Reasoning and no answer means the model was cut off mid-thought: the
+    // reply it was working towards was never emitted. include_reasoning and
+    // reasoning_effort are requests, not guarantees, and plenty of models
+    // think anyway — so buy more room once rather than report a failure
+    // the user can do nothing about.
+    if (!data.content.trim() && data.reasoning) {
+        console.warn(
+            `[BetterImgGen] Got ${data.reasoning.length} chars of reasoning and no answer \u2014 the `
+            + `${LLM_MAX_TOKENS}-token budget went entirely on thinking. Retrying once at `
+            + `${LLM_MAX_TOKENS_RETRY}.`,
+        );
+        data = await request(LLM_MAX_TOKENS_RETRY);
     }
 
     const trimmed = data.content.trim();
@@ -1377,7 +1417,9 @@ async function callLlmForPrompt(llmPrompt) {
         console.warn(
             '[BetterImgGen] The model returned nothing usable'
             + (data.reasoning
-                ? ', only reasoning. It spent its token budget thinking; raise LLM_MAX_TOKENS or simplify the instruction.'
+                ? `, only reasoning, even at ${LLM_MAX_TOKENS_RETRY} tokens. This model thinks past any `
+                    + 'budget it is given for this instruction \u2014 pick a non-reasoning model, or shorten the '
+                    + 'source material it has to read.'
                 : '. The request reached the backend and came back empty \u2014 check the network tab for the raw reply.'),
         );
     }
