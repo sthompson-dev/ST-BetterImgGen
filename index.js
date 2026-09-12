@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.8+directllm.2026-09-12';
+const BETTERIMGGEN_BUILD = '1.0.9+directllm.2026-09-12';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -1156,11 +1156,9 @@ function attachPromptLogging() {
         // is not the prompt we are after and only adds noise.
         if (!prompt) return;
         console.log(
-            `[BetterImgGen] ===== FINAL PROMPT (text completion, ${prompt.length} chars) =====
-`
+            `[BetterImgGen] ===== FINAL PROMPT (text completion, ${prompt.length} chars) =====\n`
             + prompt
-            + '
-[BetterImgGen] ===== END FINAL PROMPT =====',
+            + '\n[BetterImgGen] ===== END FINAL PROMPT =====',
         );
     };
 
@@ -1177,17 +1175,13 @@ function attachPromptLogging() {
             const content = typeof msg?.content === 'string'
                 ? msg.content
                 : JSON.stringify(msg?.content);
-            return `--- [${i}] ${role} ---
-${content}`;
-        }).join('
-');
+            return `--- [${i}] ${role} ---\n${content}`;
+        }).join('\n');
 
         console.log(
-            `[BetterImgGen] ===== FINAL PROMPT (chat completion, ${messages.length} messages) =====
-`
+            `[BetterImgGen] ===== FINAL PROMPT (chat completion, ${messages.length} messages) =====\n`
             + rendered
-            + '
-[BetterImgGen] ===== END FINAL PROMPT =====',
+            + '\n[BetterImgGen] ===== END FINAL PROMPT =====',
         );
     };
 
