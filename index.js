@@ -5,7 +5,7 @@
 // ============================================================
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { saveSettingsDebounced, generateQuietPrompt } from '../../../../script.js';
+import { saveSettingsDebounced, generateQuietPrompt, getRequestHeaders } from '../../../../script.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 
 // ── Verify imports ───────────────────────────────────────
@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.12+budget6000.2026-09-12';
+const BETTERIMGGEN_BUILD = '1.0.13+nativemedia.2026-09-12';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -31,6 +31,26 @@ const EXTENSION_NAME = 'Better Image Generation';
 const SETTINGS_KEY = 'ST-BetterImgGen';
 const LOCALSTORAGE_KEY = 'ST-BetterImgGen-settings';
 const SETTINGS_VERSION = 1;
+
+// ── SillyTavern media constants ──────────────────────────────
+// Mirrored from public/scripts/constants.js. getContext() does not expose
+// these enums and a third-party extension cannot import that module, so the
+// literals are repeated here. They are part of the saved chat format, so they
+// change rarely — but if a generated message ever renders without the gallery
+// arrows, check these against the host's constants.js first.
+const MEDIA_TYPE_IMAGE = 'image';
+const MEDIA_DISPLAY_GALLERY = 'gallery';
+const MEDIA_SOURCE_GENERATED = 'generated';
+const SCROLL_BEHAVIOR_KEEP = 'keep';
+const SWIPE_DIRECTION_RIGHT = 'right';
+const IMAGE_OVERSWIPE_ROLLOVER = 'rollover';
+
+// Marks the messages and attachments this extension owns. The IMAGE_SWIPED
+// event fires for every image message in the chat, including the built-in
+// Stable Diffusion extension's, so the swipe handler needs a way to tell ours
+// apart and leave the rest alone.
+const BETTERIMGGEN_GENERATION_TYPE = 'better_img_gen';
+const BETTERIMGGEN_MESSAGE_FLAG = 'better_img_gen';
 
 // ── Default Settings ──────────────────────────────────────
 
@@ -426,6 +446,17 @@ function registerEventListeners() {
         // Refresh character tags display if modal is open
         refreshCharacterTags();
     });
+
+    // Right-swiping past the last image of one of our messages generates
+    // another one. Older hosts have no IMAGE_SWIPED event; the rest of the
+    // extension still works without it, so warn rather than fail the init step.
+    const context = getContext();
+    const swipeEvent = context?.eventTypes?.IMAGE_SWIPED;
+    if (context?.eventSource && swipeEvent) {
+        context.eventSource.on(swipeEvent, onImageSwiped);
+    } else {
+        console.warn('[BetterImgGen] IMAGE_SWIPED unavailable — swiping an image will not regenerate it.');
+    }
 }
 
 function refreshCharacterTags() {
@@ -1546,31 +1577,268 @@ async function fetchGeneratedImage(imageInfo, comfyUrl) {
     }
 }
 
+/**
+ * Persist a generated image and return the URL the chat message should point
+ * at. Uploads to SillyTavern's own image store so that extra.media[].url is a
+ * short path: that field is written into the chat file by saveChat(), and a
+ * data URL there would add several megabytes to the chat for every image.
+ *
+ * @param {Blob} imageBlob - the PNG fetched from ComfyUI
+ * @returns {Promise<string>} a /user/images/... path, or a data URL on failure
+ */
 async function saveImageToStorage(imageBlob) {
-    // Convert blob to base64 data URL
-    return new Promise((resolve) => {
+    const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
+        reader.onloadend = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error('Could not read the generated image.'));
         reader.readAsDataURL(imageBlob);
     });
+
+    // /api/images/upload wants the raw payload, not the "data:image/png;base64,"
+    // prefix — the same as the host's own saveBase64AsFile().
+    const rawBase64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+
+    try {
+        const context = getContext();
+        const subFolder = (context && context.name2) || EXTENSION_NAME;
+        const stamp = context && typeof context.humanizedDateTime === 'function'
+            ? context.humanizedDateTime()
+            : new Date().toISOString();
+        // Dots in the name would be read as a file extension by the server.
+        const fileName = `${subFolder}_${stamp}`.replace(/\./g, '_');
+
+        const response = await fetch('/api/images/upload', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                image: rawBase64,
+                format: 'png',
+                ch_name: subFolder,
+                filename: fileName,
+            }),
+        });
+        if (!response.ok) {
+            throw new Error(`server responded ${response.status}`);
+        }
+        const data = await response.json();
+        if (!data || !data.path) {
+            throw new Error('upload returned no path');
+        }
+        return data.path;
+    } catch (err) {
+        // The image is still worth showing, so fall back to embedding it. This
+        // is a last resort, not a second option: it bloats the chat file.
+        console.warn('[BetterImgGen] Image upload failed, embedding a data URL instead:', err);
+        return dataUrl;
+    }
 }
 
-async function postImageToChat(imageDataUrl, prompt, seed) {
-    // Post as an image message to the chat
+/**
+ * Build the MediaAttachment record the host renders from. The prompt goes in
+ * `title`, which is where SillyTavern reads the caption and the img title
+ * attribute from — that is what makes the prompt visible on click rather than
+ * printed under the image.
+ *
+ * @param {{url: string, prompt: string, seed: number, negative: string, width: number, height: number}} result
+ */
+function buildMediaAttachment(result) {
+    return {
+        url: result.url,
+        type: MEDIA_TYPE_IMAGE,
+        title: result.prompt,
+        generation_type: BETTERIMGGEN_GENERATION_TYPE,
+        negative: result.negative || '',
+        source: MEDIA_SOURCE_GENERATED,
+        width: result.width,
+        height: result.height,
+        seed: result.seed,
+    };
+}
+
+/**
+ * Post a finished image as a native SillyTavern media message, matching what
+ * the built-in image generation produces: a thumbnail with an enlarge control,
+ * the prompt behind the caption rather than printed in the body, and gallery
+ * arrows for generating another one.
+ *
+ * @param {{url: string, prompt: string, seed: number, negative: string, width: number, height: number}} result
+ */
+async function postImageToChat(result) {
     const context = getContext();
     if (!context) return;
 
-    // Create a message with the image
-    const imageHtml = `<img src="${imageDataUrl}" alt="Generated Image" class="better-img-gen-generated-image" data-prompt="${escapeHtml(prompt)}" data-seed="${seed}" style="max-width:100%;border-radius:4px;">`;
-    const messageText = `**Generated Image**\nPrompt: ${prompt}\nSeed: ${seed}`;
-
-    context.addOneMessage({
-        mes: messageText + '\n' + imageHtml,
-        name: 'BetterImgGen',
+    const message = {
+        name: context.name2 || EXTENSION_NAME,
         is_user: false,
         is_system: true,
-        force_avatar: 'fa-wand-sparkles',
-    });
+        send_date: new Date().toISOString(),
+        // The host hides this text because of inline_image: false below, but
+        // it is what an unhidden message would show and what the built-in
+        // extension writes, so keep it consistent with the attachment.
+        mes: result.prompt,
+        extra: {
+            media: [buildMediaAttachment(result)],
+            // 'gallery' is what draws the left/right arrows and the counter.
+            // With 'list' the image renders but there is nothing to swipe.
+            media_display: MEDIA_DISPLAY_GALLERY,
+            media_index: 0,
+            // Adds .inline_media to .mes_text, which style.css hides. This is
+            // what keeps the prompt out of the message body.
+            inline_image: false,
+            [BETTERIMGGEN_MESSAGE_FLAG]: true,
+        },
+    };
+
+    // Push before rendering, and emit the same events the host does, so the
+    // message is a real chat entry rather than a floating DOM node: it
+    // persists, it can be deleted, and other extensions see it.
+    context.chat.push(message);
+    const messageId = context.chat.length - 1;
+    await context.eventSource.emit(context.eventTypes.MESSAGE_RECEIVED, messageId, 'extension');
+    context.addOneMessage(message);
+    await context.eventSource.emit(context.eventTypes.CHARACTER_MESSAGE_RENDERED, messageId, 'extension');
+    await context.saveChat();
+    setTimeout(() => context.scrollOnMediaLoad?.(), 200);
+}
+
+/**
+ * Run an assembled positive prompt through the ComfyUI pipeline and return the
+ * finished image. Everything from LoRA keyword matching to the stored file
+ * lives here so that both entry points and the swipe handler share one path;
+ * it deliberately does not touch the chat, so the caller decides whether the
+ * result starts a new message or joins an existing one.
+ *
+ * @param {string} sdPrompt - the final positive prompt, before LoRA replacement
+ * @param {object} s - current settings
+ * @returns {Promise<{url: string, prompt: string, seed: number, negative: string, width: number, height: number}>}
+ */
+async function renderPromptToImage(sdPrompt, s) {
+    // Apply LoRA keyword matching and replacement
+    const loraRules = getLoraRules();
+    const matchedRules = [];
+    let loraPrompt = sdPrompt;
+    for (const rule of loraRules) {
+        if (matchLoraKeywords(loraPrompt, rule)) {
+            matchedRules.push(rule);
+            loraPrompt = applyLoraReplacement(loraPrompt, rule);
+        }
+    }
+
+    const workflowStr = getWorkflowJson();
+    if (!workflowStr) {
+        throw new Error('No workflow JSON configured.');
+    }
+
+    // Log raw workflow template (first 300 chars) for debugging
+    console.log('[BetterImgGen] Raw workflow JSON template (first 300 chars):', workflowStr.substring(0, 300));
+    console.log('[BetterImgGen] Workflow JSON template length:', workflowStr.length);
+
+    // Roll the random seed here, once, and pass it down. substitutePlaceholders
+    // rolls its own when it is handed -1, which used to mean the seed recorded
+    // against the image was never the seed ComfyUI actually rendered with.
+    const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
+
+    // Substitute placeholders (before validation to allow %placeholders% in template)
+    const workflow = substitutePlaceholders(
+        workflowStr, s, loraPrompt, s.negativePrompt, actualSeed
+    );
+
+    // Log after substitution for debugging
+    console.log('[BetterImgGen] Workflow JSON after substitution (first 300 chars):', workflow.substring(0, 300));
+    console.log('[BetterImgGen] Workflow JSON after substitution length:', workflow.length);
+
+    const validated = validateWorkflowJson(workflow);
+    if (!validated.valid) {
+        throw new Error('Invalid workflow JSON: ' + validated.error);
+    }
+
+    const finalWorkflow = injectLoraChain(validated.data, matchedRules);
+
+    // Pass the object, not a string — proxyFetch serializes it correctly
+    const promptId = await submitToComfyUI(finalWorkflow, s.comfyuiUrl);
+    const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
+    const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
+    const url = await saveImageToStorage(imageBlob);
+
+    return {
+        url,
+        prompt: loraPrompt,
+        seed: actualSeed,
+        negative: s.negativePrompt || '',
+        width: s.width,
+        height: s.height,
+    };
+}
+
+/**
+ * Regenerate into an existing message when the user swipes right past its last
+ * image. The host emits IMAGE_SWIPED before its own "only one image, nothing to
+ * swipe" early return, so this fires on a freshly posted single image too —
+ * which is what makes the arrows useful straight away.
+ *
+ * @param {{message: object, element: object, direction: string}} payload
+ */
+async function onImageSwiped({ message, element, direction }) {
+    // Every image message in the chat raises this, the built-in Stable
+    // Diffusion extension's included. Only act on messages we posted.
+    if (!message || !message.extra || message.extra[BETTERIMGGEN_MESSAGE_FLAG] !== true) return;
+    if (direction !== SWIPE_DIRECTION_RIGHT) return;
+
+    const media = message.extra.media;
+    if (!Array.isArray(media) || media.length === 0) return;
+
+    // Only the rightmost image generates. A right swipe anywhere else is the
+    // user paging forward through images they already have.
+    const index = typeof message.extra.media_index === 'number' ? message.extra.media_index : 0;
+    if (index !== media.length - 1) return;
+
+    const context = getContext();
+    // The user can ask for swipes to wrap around instead of generating.
+    if (context?.powerUserSettings?.image_overswipe === IMAGE_OVERSWIPE_ROLLOVER) return;
+
+    if (isGenerationRunning) {
+        toastr.warning('A generation is already in progress.');
+        return;
+    }
+
+    const s = getSettings();
+    if (!s.comfyuiUrl) {
+        toastr.error('Please configure the ComfyUI URL in settings first.');
+        return;
+    }
+
+    // Offer the prompt that produced the image on screen, so the user can
+    // adjust it rather than re-rolling the same thing.
+    const previous = media[index] || {};
+    const edited = await showPromptEditor(previous.title || '');
+    if (edited === null) return;
+
+    isGenerationRunning = true;
+    toastr.info('Generating...');
+
+    try {
+        const result = await renderPromptToImage(edited, s);
+
+        message.extra.media.push(buildMediaAttachment(result));
+        message.extra.media_index = message.extra.media.length - 1;
+        message.extra.inline_image = false;
+        context.appendMediaToMessage(message, element, SCROLL_BEHAVIOR_KEEP);
+        await context.saveChat();
+
+        generationHistory.push({
+            imagePath: result.url,
+            prompt: result.prompt,
+            seed: result.seed,
+            timestamp: Date.now(),
+        });
+
+        toastr.success('Image generated!');
+    } catch (err) {
+        toastr.error('Generation failed: ' + err.message);
+        console.error('[BetterImgGen]', err);
+    } finally {
+        isGenerationRunning = false;
+    }
 }
 
 // ── Generation Orchestrator ───────────────────────────────
@@ -1640,66 +1908,17 @@ async function generateImage(modeName, characterOverride) {
             sdPrompt = finalPrompt;
         }
 
-        // 9. Apply LoRA keyword matching and replacement
-        // sdPrompt is the final assembled prompt (possibly edited by user)
-        const loraRules = getLoraRules();
-        const matchedRules = [];
-        let loraPrompt = sdPrompt;
-        for (const rule of loraRules) {
-            if (matchLoraKeywords(loraPrompt, rule)) {
-                matchedRules.push(rule);
-                loraPrompt = applyLoraReplacement(loraPrompt, rule);
-            }
-        }
+        // 9. Render it: LoRA matching, workflow, ComfyUI, stored image
+        const result = await renderPromptToImage(sdPrompt, s);
 
-        // 10. Get workflow JSON
-        const workflowStr = getWorkflowJson();
-        if (!workflowStr) {
-            throw new Error('No workflow JSON configured.');
-        }
+        // 10. Post it to chat as a native media message
+        await postImageToChat(result);
 
-        // Log raw workflow template (first 300 chars) for debugging
-        console.log('[BetterImgGen] Raw workflow JSON template (first 300 chars):', workflowStr.substring(0, 300));
-        console.log('[BetterImgGen] Workflow JSON template length:', workflowStr.length);
-
-        // 11. Substitute placeholders (before validation to allow %placeholders% in template)
-        const workflow = substitutePlaceholders(
-            workflowStr, s, loraPrompt, s.negativePrompt, s.seed
-        );
-
-        // Log after substitution for debugging
-        console.log('[BetterImgGen] Workflow JSON after substitution (first 300 chars):', workflow.substring(0, 300));
-        console.log('[BetterImgGen] Workflow JSON after substitution length:', workflow.length);
-
-        // 12. Validate workflow after substitution
-        const validated = validateWorkflowJson(workflow);
-        if (!validated.valid) {
-            throw new Error('Invalid workflow JSON: ' + validated.error);
-        }
-
-        // 13. Inject LoRA nodes into workflow
-        let finalWorkflow = validated.data;
-        finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
-
-        // 14. Submit to ComfyUI (pass object, not string — proxyFetch will serialize it correctly)
-        const promptId = await submitToComfyUI(finalWorkflow, s.comfyuiUrl);
-
-        // 15. Poll for result
-        const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
-
-        // 16. Fetch the image
-        const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
-
-        // 17. Save and post to chat
-        const imageDataUrl = await saveImageToStorage(imageBlob);
-        const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
-        await postImageToChat(imageDataUrl, loraPrompt, actualSeed);
-
-        // 18. Store in generation history for swiping
+        // 11. Store in generation history for swiping
         generationHistory.push({
-            imagePath: imageDataUrl,
-            prompt: loraPrompt,
-            seed: actualSeed,
+            imagePath: result.url,
+            prompt: result.prompt,
+            seed: result.seed,
             timestamp: Date.now(),
         });
 
@@ -2019,66 +2238,17 @@ async function generateImageFromTemplate(template, characterName, customPrompt) 
             sdPrompt = finalPrompt;
         }
 
-        // 8. Apply LoRA keyword matching and replacement
-        // sdPrompt is the final assembled prompt (possibly edited by user)
-        const loraRules = getLoraRules();
-        const matchedRules = [];
-        let loraPrompt = sdPrompt;
-        for (const rule of loraRules) {
-            if (matchLoraKeywords(loraPrompt, rule)) {
-                matchedRules.push(rule);
-                loraPrompt = applyLoraReplacement(loraPrompt, rule);
-            }
-        }
+        // 8. Render it: LoRA matching, workflow, ComfyUI, stored image
+        const result = await renderPromptToImage(sdPrompt, s);
 
-        // 9. Get workflow JSON
-        const workflowStr = getWorkflowJson();
-        if (!workflowStr) {
-            throw new Error('No workflow JSON configured.');
-        }
+        // 9. Post it to chat as a native media message
+        await postImageToChat(result);
 
-        // Log raw workflow template (first 300 chars) for debugging
-        console.log('[BetterImgGen] Raw workflow JSON template (first 300 chars):', workflowStr.substring(0, 300));
-        console.log('[BetterImgGen] Workflow JSON template length:', workflowStr.length);
-
-        // 10. Substitute placeholders (before validation to allow %placeholders% in template)
-        const workflow = substitutePlaceholders(
-            workflowStr, s, loraPrompt, s.negativePrompt, s.seed
-        );
-
-        // Log after substitution for debugging
-        console.log('[BetterImgGen] Workflow JSON after substitution (first 300 chars):', workflow.substring(0, 300));
-        console.log('[BetterImgGen] Workflow JSON after substitution length:', workflow.length);
-
-        // 11. Validate workflow after substitution
-        const validated = validateWorkflowJson(workflow);
-        if (!validated.valid) {
-            throw new Error('Invalid workflow JSON: ' + validated.error);
-        }
-
-        // 12. Inject LoRA nodes into workflow
-        let finalWorkflow = validated.data;
-        finalWorkflow = injectLoraChain(finalWorkflow, matchedRules);
-
-        // 13. Submit to ComfyUI (pass object, not string — proxyFetch will serialize it correctly)
-        const promptId = await submitToComfyUI(finalWorkflow, s.comfyuiUrl);
-
-        // 14. Poll for result
-        const imageInfo = await pollForResult(promptId, s.comfyuiUrl);
-
-        // 15. Fetch the image
-        const imageBlob = await fetchGeneratedImage(imageInfo, s.comfyuiUrl);
-
-        // 16. Save and post to chat
-        const imageDataUrl = await saveImageToStorage(imageBlob);
-        const actualSeed = s.seed === -1 ? Math.floor(Math.random() * 2147483647) : s.seed;
-        await postImageToChat(imageDataUrl, loraPrompt, actualSeed);
-
-        // 17. Store in generation history for swiping
+        // 10. Store in generation history for swiping
         generationHistory.push({
-            imagePath: imageDataUrl,
-            prompt: loraPrompt,
-            seed: actualSeed,
+            imagePath: result.url,
+            prompt: result.prompt,
+            seed: result.seed,
             timestamp: Date.now(),
         });
 
