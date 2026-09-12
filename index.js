@@ -20,7 +20,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 // Logged at module scope, before any other work, so the browser console shows
 // which build is actually being served. If this line is missing or the version
 // is stale, the deployed file (or a cached copy of it) is not the current one.
-const BETTERIMGGEN_BUILD = '1.0.7+cardsearch.2026-09-11';
+const BETTERIMGGEN_BUILD = '1.0.8+directllm.2026-09-12';
 console.log(`%c[BetterImgGen] module loaded — build ${BETTERIMGGEN_BUILD}`, 'color:#e07b39;font-weight:bold');
 window.BETTERIMGGEN_BUILD = BETTERIMGGEN_BUILD;
 
@@ -1122,10 +1122,12 @@ function buildLlmPrompt(template, chatContext) {
  * Attach one-shot listeners that log the fully assembled prompt SillyTavern
  * sends to the model.
  *
- * What we pass to generateQuietPrompt is only a fragment: Generate() injects it
- * into a prompt that also carries the system prompt, character card, persona,
- * example dialogue, chat history, World Info and Author's Note. These two events
- * fire after that assembly, so they show what the model actually receives.
+ * Only used on the generateQuietPrompt() fallback path, where what we pass is
+ * a fragment: Generate() injects it into a prompt that also carries the system
+ * prompt, character card, persona, example dialogue, chat history, World Info
+ * and Author's Note. These two events fire after that assembly, so they show
+ * what the model actually receives. The direct completion path sends exactly
+ * the payload it logs, so it has nothing to reconcile.
  *
  * @returns {() => void} Detach function. Always call it — a listener left
  *   attached would dump the user's ordinary chat generations to the console.
@@ -1198,46 +1200,195 @@ ${content}`;
     };
 }
 
+// Our requests are short by construction: a tag list or a single image prompt.
+// Capping the reply keeps a model that ignores the instruction and starts
+// narrating from running to the full roleplay response length.
+const LLM_MAX_TOKENS = 600;
+
+// Deliberately blunt. These requests are issued from inside a roleplay session,
+// and without an explicit frame models tend to answer in character or open with
+// an "[OOC: ...]" note before the actual answer.
+const LLM_SYSTEM_PROMPT = 'You are a utility assistant for an image-prompt tool. '
+    + 'Follow the instruction exactly and reply with the requested output only: '
+    + 'no preamble, no commentary, no roleplay, no OOC notes, no markdown fences.';
+
+/**
+ * The instruction wrapped as a two-message conversation.
+ *
+ * Text completion gets the same array; TextCompletionService renders it through
+ * the active instruct template, or joins it plainly if there is none.
+ */
+function buildLlmMessages(llmPrompt) {
+    return [
+        { role: 'system', content: LLM_SYSTEM_PROMPT },
+        { role: 'user', content: llmPrompt },
+    ];
+}
+
+/**
+ * Normalise what a completion service hands back.
+ *
+ * @returns {{content: string, reasoning: string}}
+ */
+function unwrapCompletionResult(result) {
+    if (typeof result === 'function') {
+        // stream: false should make this unreachable. Fail loudly rather than
+        // stringify a generator function into the prompt.
+        throw new Error('Completion service returned a stream despite stream: false');
+    }
+    return {
+        content: typeof result?.content === 'string' ? result.content : '',
+        reasoning: typeof result?.reasoning === 'string' ? result.reasoning : '',
+    };
+}
+
+/**
+ * One-off chat completion using the user's current connection and preset.
+ *
+ * The preset supplies temperature, proxy details and every source-specific
+ * field; the payload below overrides only what has to differ for an
+ * out-of-band request. If the preset cannot be resolved the service warns and
+ * proceeds, which is why source and model are passed explicitly.
+ */
+async function requestChatCompletion(context, llmPrompt) {
+    const settings = context.chatCompletionSettings || {};
+    const presetName = context.getPresetManager?.('openai')?.getSelectedPresetName?.();
+    const payload = {
+        stream: false,
+        messages: buildLlmMessages(llmPrompt),
+        model: context.getChatCompletionModel ? context.getChatCompletionModel() : undefined,
+        chat_completion_source: settings.chat_completion_source,
+        max_tokens: LLM_MAX_TOKENS,
+    };
+
+    console.log(
+        '[BetterImgGen] Direct chat completion \u2014',
+        payload.chat_completion_source, '/', payload.model,
+        '| preset:', presetName || '(none)',
+        '| max_tokens:', LLM_MAX_TOKENS,
+    );
+
+    return unwrapCompletionResult(
+        await context.ChatCompletionService.processRequest(payload, { presetName }, true, null),
+    );
+}
+
+/**
+ * One-off text completion using the user's current backend, preset and
+ * instruct template.
+ */
+async function requestTextCompletion(context, llmPrompt) {
+    const settings = context.textCompletionSettings || {};
+    const presetName = context.getPresetManager?.('textgenerationwebui')?.getSelectedPresetName?.();
+    const instructName = context.getPresetManager?.('instruct')?.getSelectedPresetName?.();
+    const payload = {
+        stream: false,
+        prompt: buildLlmMessages(llmPrompt),
+        max_tokens: LLM_MAX_TOKENS,
+        api_type: settings.type,
+    };
+
+    console.log(
+        '[BetterImgGen] Direct text completion \u2014',
+        payload.api_type,
+        '| preset:', presetName || '(none)',
+        '| instruct:', instructName || '(none)',
+        '| max_tokens:', LLM_MAX_TOKENS,
+    );
+
+    return unwrapCompletionResult(
+        await context.TextCompletionService.processRequest(payload, { presetName, instructName }, true, null),
+    );
+}
+
+/**
+ * Ask the model for a prompt or a tag list.
+ *
+ * Deliberately does not go through generateQuietPrompt()/Generate(). Routing
+ * through the roleplay pipeline made our request inherit the whole roleplay
+ * turn: the full chat history and world info were prepended (measured at
+ * ~120k tokens and 124 messages on a real chat), which buried the instruction —
+ * and, the actual cause of the "the LLM never responds" bug, the reply was then
+ * passed through cleanUpMessage(), which runs the user's regex scripts for AI
+ * output. A script that strips "[OOC: ...]" notes deleted the entire reply,
+ * because the roleplay framing had induced the model to open with one. The
+ * request had succeeded and the tags had arrived; SillyTavern erased them
+ * before this extension ever saw them.
+ *
+ * The completion services post straight to the backend, so none of the
+ * roleplay context, world info or output post-processing applies.
+ *
+ * @param {string} llmPrompt The full instruction to send.
+ * @returns {Promise<string>} The reply, trimmed; '' if the model produced none.
+ */
 async function callLlmForPrompt(llmPrompt) {
-    // Use SillyTavern's built-in quiet text generation API
     console.log('[BetterImgGen] callLlmForPrompt called');
 
     console.log(
-        `[BetterImgGen] ===== INJECTED FRAGMENT (${llmPrompt?.length || 0} chars) =====
-`
+        `[BetterImgGen] ===== INJECTED FRAGMENT (${llmPrompt?.length || 0} chars) =====\n`
         + llmPrompt
-        + '
-[BetterImgGen] ===== END INJECTED FRAGMENT =====',
+        + '\n[BetterImgGen] ===== END INJECTED FRAGMENT =====',
     );
 
-    const detachPromptLogging = attachPromptLogging();
+    const context = getContext();
+    const api = context?.mainApi;
+    let data;
 
     try {
-        const result = await generateQuietPrompt({ quietPrompt: llmPrompt });
-        console.log(
-            `[BetterImgGen] ===== LLM RESPONSE (${result?.length || 0} chars, type ${typeof result}) =====
-`
-            + result
-            + '
-[BetterImgGen] ===== END LLM RESPONSE =====',
-        );
-        if (typeof result === 'string' && !result.trim()) {
+        if (api === 'openai' && context.ChatCompletionService) {
+            data = await requestChatCompletion(context, llmPrompt);
+        } else if (api === 'textgenerationwebui' && context.TextCompletionService) {
+            data = await requestTextCompletion(context, llmPrompt);
+        } else {
+            // Older SillyTavern, or a backend with no direct-request service
+            // (KoboldAI, NovelAI, Horde). The pipeline call still works, with
+            // all the caveats above, so warn rather than fail.
             console.warn(
-                '[BetterImgGen] The model returned an empty string. generateQuietPrompt strips '
-                + 'reasoning blocks from the reply, so a response that was entirely reasoning '
-                + 'arrives here as empty. Check the raw reply in the network tab.',
+                `[BetterImgGen] No direct completion service for main API "${api}" \u2014 falling back `
+                + 'to generateQuietPrompt(). The reply will be sent with the full chat context and '
+                + "passed through SillyTavern's AI-output regex scripts, so it may be altered or emptied.",
             );
+            const detachPromptLogging = attachPromptLogging();
+            try {
+                data = unwrapCompletionResult({
+                    content: await generateQuietPrompt({ quietPrompt: llmPrompt }),
+                });
+            } finally {
+                detachPromptLogging();
+            }
         }
-        return result || '';
     } catch (err) {
-        console.error('[BetterImgGen] generateQuietPrompt threw error:', err);
-        console.error('[BetterImgGen] Error name:', err.name);
-        console.error('[BetterImgGen] Error message:', err.message);
-        console.error('[BetterImgGen] Error stack:', err.stack);
-        throw new Error('LLM generation failed: ' + err.message);
-    } finally {
-        detachPromptLogging();
+        console.error('[BetterImgGen] LLM request failed:', err);
+        console.error('[BetterImgGen] Error name:', err?.name);
+        console.error('[BetterImgGen] Error message:', err?.message);
+        console.error('[BetterImgGen] Error stack:', err?.stack);
+        throw new Error('LLM generation failed: ' + (err?.message || err));
     }
+
+    const trimmed = data.content.trim();
+
+    // Both lengths are logged on purpose: an empty result here means the model
+    // genuinely said nothing, and can no longer be confused with a reply this
+    // extension received and then lost.
+    console.log(
+        `[BetterImgGen] ===== LLM RESPONSE (${data.content.length} chars raw, `
+        + `${trimmed.length} after trim`
+        + (data.reasoning ? `, ${data.reasoning.length} chars of reasoning` : '')
+        + ') =====\n'
+        + data.content
+        + '\n[BetterImgGen] ===== END LLM RESPONSE =====',
+    );
+
+    if (!trimmed) {
+        console.warn(
+            '[BetterImgGen] The model returned nothing usable'
+            + (data.reasoning
+                ? ', only reasoning. It spent its token budget thinking; raise LLM_MAX_TOKENS or simplify the instruction.'
+                : '. The request reached the backend and came back empty \u2014 check the network tab for the raw reply.'),
+        );
+    }
+
+    return trimmed;
 }
 
 function assembleFinalPositivePrompt(llmGeneratedPrompt, charTags, stylePrefix) {
